@@ -808,24 +808,387 @@
     this.doc = null;
   };
 
+  // ------------------------------------------------------- issue attributes
+  //
+  // Every other field of the issue edit form (status, assignee, dates, custom
+  // fields...) is shared through one Y.Map per form: field name => {v, u, n}
+  // (value, user id, user name), last write wins per field. Values are read
+  // from and written into the native controls, so Redmine's own handlers keep
+  // working: a remote status change refreshes the form through
+  // updateIssueFrom exactly like a local one.
+
+  var FIELD_DEBOUNCE_MS = 150;
+  var CHANGED_MS = 8000;
+  var REBIND_DEBOUNCE_MS = 50;
+  // Text fields have their own documents; notes privacy and attachment
+  // removal belong to the person submitting.
+  var UNSHARED_FIELDS = ['issue[description]', 'issue[notes]', 'issue[private_notes]', 'issue[lock_version]',
+    'issue[deleted_attachment_ids][]'];
+  var UNSHARED_TYPES = ['hidden', 'file', 'submit', 'button', 'reset', 'image'];
+
+  function describeForm(form) {
+    if (config.targets.indexOf('issue_attributes') < 0 || !form.querySelector('#all_attributes')) return null;
+    var m = (form.getAttribute('action') || '').match(/\/issues\/(\d+)(?:[/?#]|$)/);
+    if (!m) return null;
+    return {
+      key: 'issue:' + m[1] + ':attributes',
+      versionField: form.querySelector('input[name="issue[lock_version]"]')
+    };
+  }
+
+  function sharedField(control) {
+    var name = control.name;
+    if (!name || name.indexOf('issue[') !== 0 || UNSHARED_FIELDS.indexOf(name) >= 0) return false;
+    return control.tagName !== 'INPUT' || UNSHARED_TYPES.indexOf(control.type) < 0;
+  }
+
+  function isArrayField(controls) {
+    var first = controls[0];
+    if (first.tagName === 'SELECT') return first.multiple;
+    return first.type === 'checkbox' && /\[\]$/.test(first.name);
+  }
+
+  // The value the form would submit for the field: a string, or an array for
+  // multi-selects and checkbox groups.
+  function readField(controls) {
+    var first = controls[0];
+    if (first.tagName === 'SELECT') {
+      if (!first.multiple) return first.value;
+      return Array.prototype.map.call(first.selectedOptions, function (o) { return o.value; });
+    }
+    if (first.type === 'checkbox' || first.type === 'radio') {
+      var checked = [];
+      for (var i = 0; i < controls.length; i++) if (controls[i].checked) checked.push(controls[i].value);
+      if (isArrayField(controls)) return checked;
+      return checked.length ? checked[0] : '';
+    }
+    return first.value;
+  }
+
+  // Puts +value+ into the controls; true when anything changed. Choices this
+  // form does not offer (an assignee the user may not pick) are left alone.
+  function writeField(controls, value) {
+    var first = controls[0];
+    var list = Array.isArray(value) ? value : [value];
+    var changed = false;
+    var i;
+    if (first.tagName === 'SELECT') {
+      if (!first.multiple) {
+        if (first.value === value) return false;
+        for (i = 0; i < first.options.length; i++) {
+          if (first.options[i].value === value) { first.value = value; return true; }
+        }
+        return false;
+      }
+      for (i = 0; i < first.options.length; i++) {
+        var want = list.indexOf(first.options[i].value) >= 0;
+        if (first.options[i].selected !== want) { first.options[i].selected = want; changed = true; }
+      }
+      return changed;
+    }
+    if (first.type === 'checkbox' || first.type === 'radio') {
+      for (i = 0; i < controls.length; i++) {
+        var on = list.indexOf(controls[i].value) >= 0;
+        if (controls[i].checked !== on) { controls[i].checked = on; changed = true; }
+      }
+      return changed;
+    }
+    if (typeof value !== 'string' || first.value === value) return false;
+    first.value = value;
+    return true;
+  }
+
+  function sameValue(a, b) {
+    return JSON.stringify(a) === JSON.stringify(b);
+  }
+
+  function FieldsSession(form, info) {
+    this.form = form;
+    this.key = info.key;
+    this.versionField = info.versionField;
+    this.clientId = randomId();
+    this.epoch = null;
+    this.since = 0;
+    this.pending = [];
+    this.compactRequested = false;
+    this.others = [];
+    this.errors = 0;
+    this.timer = null;
+    this.inflight = null;
+    this.stopped = false;
+    this.doc = null;
+    this.map = null;
+    this.dirty = {};
+    this.touched = {};
+    this.changed = {};
+    this.applying = false;
+
+    this.markForm();
+
+    var self = this;
+    this.onChange = function (e) {
+      var control = e.target;
+      if (self.applying || !control || !sharedField(control)) return;
+      self.dirty[control.name] = true;
+      if (self.changed[control.name]) { delete self.changed[control.name]; self.renderChanged(control.name); }
+      self.schedule(FIELD_DEBOUNCE_MS);
+    };
+    form.addEventListener('change', this.onChange);
+    form.addEventListener('input', this.onChange);
+    // Redmine replaces the content of #all_attributes when status, tracker or
+    // project change.
+    this.observer = new MutationObserver(function (mutations) {
+      for (var i = 0; i < mutations.length; i++) {
+        if (mutations[i].target.id !== 'all_attributes') continue;
+        clearTimeout(self.rebindTimer);
+        self.rebindTimer = setTimeout(function () { self.rebind(); }, REBIND_DEBOUNCE_MS);
+        return;
+      }
+    });
+    this.observer.observe(form, { childList: true, subtree: true });
+    this.onVisibility = function () { if (document.visibilityState === 'visible') self.schedule(0); };
+    document.addEventListener('visibilitychange', this.onVisibility);
+    this.onPageHide = function () { self.flush(); self.leave(); };
+    window.addEventListener('pagehide', this.onPageHide);
+    this.onSubmit = function () { self.syncBeforeSubmit(); };
+    form.addEventListener('submit', this.onSubmit);
+
+    this.schedule(0);
+  }
+
+  FieldsSession.prototype.schedule = Session.prototype.schedule;
+  FieldsSession.prototype.nextDelay = Session.prototype.nextDelay;
+  FieldsSession.prototype.applyRemoteUpdates = Session.prototype.applyRemoteUpdates;
+  FieldsSession.prototype.bumpVersion = Session.prototype.bumpVersion;
+  FieldsSession.prototype.syncBeforeSubmit = Session.prototype.syncBeforeSubmit;
+  FieldsSession.prototype.flush = Session.prototype.flush;
+  FieldsSession.prototype.leave = Session.prototype.leave;
+
+  FieldsSession.prototype.markForm = function () {
+    this.marker = document.createElement('input');
+    this.marker.type = 'hidden';
+    this.marker.name = 'realtime_editor_docs[]';
+    this.marker.value = this.key;
+    this.form.appendChild(this.marker);
+  };
+
+  FieldsSession.prototype.controls = function (name) {
+    var found = this.form.querySelectorAll('[name="' + name.replace(/"/g, '\\"') + '"]');
+    var list = [];
+    for (var i = 0; i < found.length; i++) if (sharedField(found[i])) list.push(found[i]);
+    return list;
+  };
+
+  // --- Yjs <-> form
+
+  FieldsSession.prototype.rebuildDoc = function (updates) {
+    var self = this;
+    if (this.doc) this.doc.destroy();
+    this.pending = [];
+    this.doc = new Y.Doc();
+    this.map = this.doc.getMap('fields');
+    this.doc.on('update', function (update, origin) {
+      if (origin === 'local') self.pending.push(update);
+    });
+    this.map.observe(function (event, txn) {
+      if (txn.origin === 'local') return;
+      event.keysChanged.forEach(function (name) { self.applyEntry(name, true); });
+    });
+    this.applyRemoteUpdates(updates);
+  };
+
+  FieldsSession.prototype.applyEntry = function (name, highlight) {
+    var entry = this.map.get(name);
+    var controls = this.controls(name);
+    if (!entry || !controls.length) return;
+    this.applying = true;
+    try {
+      if (writeField(controls, entry.v)) {
+        if (highlight) this.markChanged(name, entry);
+        controls[0].dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    } finally {
+      this.applying = false;
+    }
+  };
+
+  FieldsSession.prototype.pushLocalChanges = function () {
+    if (!this.doc) return;
+    var names = Object.keys(this.dirty);
+    this.dirty = {};
+    var sets = [];
+    for (var i = 0; i < names.length; i++) {
+      var controls = this.controls(names[i]);
+      if (!controls.length) continue;
+      var value = readField(controls);
+      var current = this.map.get(names[i]);
+      if (!current || !sameValue(current.v, value)) sets.push([names[i], value]);
+    }
+    if (!sets.length) return;
+    var self = this;
+    this.doc.transact(function () {
+      for (var j = 0; j < sets.length; j++) {
+        self.map.set(sets[j][0], { v: sets[j][1], u: config.userId, n: config.userName });
+        self.touched[sets[j][0]] = true;
+      }
+    }, 'local');
+  };
+
+  // A new epoch (somebody saved) starts from an empty map; the fields this
+  // form changed are still what it will submit, so they are announced again.
+  FieldsSession.prototype.repushTouched = function () {
+    var names = Object.keys(this.touched);
+    for (var i = 0; i < names.length; i++) this.dirty[names[i]] = true;
+    this.pushLocalChanges();
+  };
+
+  // After Redmine re-rendered the form: the new controls carry the values the
+  // form was serialized with, which may predate an entry applied meanwhile.
+  FieldsSession.prototype.rebind = function () {
+    if (this.stopped || !this.map) return;
+    var self = this;
+    this.map.forEach(function (entry, name) { self.applyEntry(name, false); });
+    Object.keys(this.changed).forEach(function (name) { self.renderChanged(name); });
+    if (!this.marker.parentNode) this.form.appendChild(this.marker);
+  };
+
+  // --- "changed by" highlight
+
+  FieldsSession.prototype.markChanged = function (name, entry) {
+    var self = this;
+    this.changed[name] = { by: entry.n, userId: entry.u, at: Date.now() };
+    this.renderChanged(name);
+    setTimeout(function () { self.renderChanged(name); }, CHANGED_MS + 50);
+  };
+
+  FieldsSession.prototype.renderChanged = function (name) {
+    var controls = this.controls(name);
+    var chips = this.form.querySelectorAll('.realtime-editor-changed-by');
+    var i;
+    for (i = 0; i < chips.length; i++) {
+      if (chips[i].getAttribute('data-field') === name) chips[i].parentNode.removeChild(chips[i]);
+    }
+    var mark = this.changed[name];
+    if (mark && Date.now() - mark.at > CHANGED_MS) { delete this.changed[name]; mark = null; }
+    for (i = 0; i < controls.length; i++) {
+      controls[i].classList.toggle('realtime-editor-changed', !!mark);
+      controls[i].style.outlineColor = mark ? colorFor(mark.userId) : '';
+    }
+    if (!mark || !controls.length) return;
+    var chip = el('span', 'realtime-editor-changed-by', t.changed_by.replace('%{name}', mark.by));
+    chip.setAttribute('data-field', name);
+    chip.style.color = colorFor(mark.userId);
+    controls[controls.length - 1].insertAdjacentElement('afterend', chip);
+  };
+
+  // --- transport
+
+  FieldsSession.prototype.sync = function () {
+    var self = this;
+    if (this.stopped || this.inflight) return;
+    this.pushLocalChanges();
+
+    var body = new URLSearchParams();
+    body.set('key', this.key);
+    body.set('client_id', this.clientId);
+    body.set('since', String(this.since));
+    body.set('presence', '1');
+    if (this.epoch !== null) body.set('epoch', String(this.epoch));
+    var sent = this.pending;
+    this.pending = [];
+    if (sent.length) body.set('update', encodeBase64(Y.mergeUpdates(sent)));
+    if (this.compactRequested && this.since > 0) {
+      body.set('snapshot', encodeBase64(Y.encodeStateAsUpdate(this.doc)));
+      body.set('snapshot_upto', String(this.since));
+      this.compactRequested = false;
+    }
+    var waiting = config.longPoll && this.epoch !== null && document.visibilityState === 'visible' && !sent.length;
+    if (waiting) body.set('wait', '1');
+
+    var controller = new AbortController();
+    controller.waiting = waiting;
+    this.inflight = controller;
+
+    fetch(config.syncUrl, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'X-CSRF-Token': csrfToken(), 'Accept': 'application/json' },
+      body: body,
+      signal: controller.signal
+    }).then(function (res) {
+      if (res.status === 403) { self.stop('forbidden'); throw new Error('forbidden'); }
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.json();
+    }).then(function (json) {
+      self.inflight = null;
+      self.errors = 0;
+      self.handle(json);
+      self.schedule(waiting ? 0 : self.nextDelay());
+    }).catch(function (err) {
+      self.inflight = null;
+      if (self.stopped) return;
+      if (sent.length) self.pending = sent.concat(self.pending);
+      if (err.name === 'AbortError') { self.schedule(0); return; }
+      self.errors++;
+      self.schedule(self.nextDelay());
+    });
+  };
+
+  FieldsSession.prototype.handle = function (json) {
+    var wasJoined = this.epoch !== null;
+    if (!wasJoined || json.epoch_changed) {
+      this.epoch = json.epoch;
+      this.since = json.last_seq || 0;
+      this.rebuildDoc(json.updates || []);
+      if (wasJoined) this.repushTouched();
+    } else {
+      this.applyRemoteUpdates(json.updates || []);
+      if (json.last_seq > this.since) this.since = json.last_seq;
+    }
+    if (json.compact_suggested && Math.random() < 0.5) this.compactRequested = true;
+    this.others = (json.presences || []).filter(function (p) { return p.user_id !== config.userId; });
+    this.bumpVersion(json.synced_from_version, json.synced_version);
+  };
+
+  FieldsSession.prototype.stop = function (reason) {
+    if (this.stopped) return;
+    this.stopped = true;
+    clearTimeout(this.timer);
+    clearTimeout(this.rebindTimer);
+    if (this.inflight) this.inflight.abort();
+    if (reason !== 'forbidden') { this.flush(); this.leave(); }
+    this.observer.disconnect();
+    this.form.removeEventListener('change', this.onChange);
+    this.form.removeEventListener('input', this.onChange);
+    this.form.removeEventListener('submit', this.onSubmit);
+    document.removeEventListener('visibilitychange', this.onVisibility);
+    window.removeEventListener('pagehide', this.onPageHide);
+    var self = this;
+    Object.keys(this.changed).forEach(function (name) { delete self.changed[name]; self.renderChanged(name); });
+    if (this.marker.parentNode) this.marker.parentNode.removeChild(this.marker);
+    if (this.doc) this.doc.destroy();
+    this.doc = null;
+    this.map = null;
+  };
+
   // ------------------------------------------------------------- bootstrap
 
-  // Sessions exist only while the textarea is on screen: Redmine keeps the
-  // issue edit form (and the description toolbar) hidden until the user asks
-  // for it, and journal forms are injected/removed by ajax.
+  // Sessions exist only while the textarea / form is on screen: Redmine keeps
+  // the issue edit form (and the description toolbar) hidden until the user
+  // asks for it, and journal forms are injected/removed by ajax.
   var sessions = new Map();
+  var formSessions = new Map();
   var HIDDEN_GRACE_MS = 3000;
 
-  function scan() {
-    var areas = document.querySelectorAll('textarea.wiki-edit');
+  function track(registry, elements, describeFn, Ctor) {
     var now = Date.now();
-    for (var i = 0; i < areas.length; i++) {
-      var ta = areas[i];
-      var visible = isVisible(ta);
-      var session = sessions.get(ta);
-      if (visible && !session && !ta.disabled) {
-        var info = describe(ta);
-        if (info) sessions.set(ta, new Session(ta, info));
+    for (var i = 0; i < elements.length; i++) {
+      var node = elements[i];
+      var visible = isVisible(node);
+      var session = registry.get(node);
+      if (visible && !session && !node.disabled) {
+        var info = describeFn(node);
+        if (info) registry.set(node, new Ctor(node, info));
       } else if (session) {
         // Brief hiding (wiki preview tab) should not end the session.
         if (visible) {
@@ -834,13 +1197,18 @@
           session.hiddenSince = now;
         } else if (now - session.hiddenSince > HIDDEN_GRACE_MS) {
           session.stop();
-          sessions.delete(ta);
+          registry.delete(node);
         }
       }
     }
-    sessions.forEach(function (session, ta) {
-      if (!document.body.contains(ta)) { session.stop(); sessions.delete(ta); }
+    registry.forEach(function (session, node) {
+      if (!document.body.contains(node)) { session.stop(); registry.delete(node); }
     });
+  }
+
+  function scan() {
+    track(sessions, document.querySelectorAll('textarea.wiki-edit'), describe, Session);
+    track(formSessions, document.querySelectorAll('form#issue-form'), describeForm, FieldsSession);
   }
 
   function start() {

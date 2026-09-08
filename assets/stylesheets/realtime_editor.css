@@ -158,3 +158,16 @@ textarea.realtime-editor-posted {
   top: 100%;
   border-radius: 0 3px 3px 3px;
 }
+
+/* Issue fields just changed by another editor. */
+.realtime-editor-changed {
+  outline: 2px solid;
+  outline-offset: 1px;
+}
+
+.realtime-editor-changed-by {
+  margin-left: 0.5em;
+  font-size: 0.85em;
+  font-style: italic;
+  white-space: nowrap;
+}

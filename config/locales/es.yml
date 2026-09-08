@@ -1,6 +1,7 @@
 es:
   label_realtime_editor_targets: Campos colaborativos
   label_realtime_editor_target_issue_description: Descripción de la petición
+  label_realtime_editor_target_issue_attributes: Otros campos de la petición (estado, asignado, fechas, campos personalizados…)
   label_realtime_editor_target_issue_notes: Notas de la petición (comentario nuevo)
   label_realtime_editor_target_journal_notes: Edición de un comentario existente
   label_realtime_editor_target_wiki: Páginas wiki
@@ -37,3 +38,4 @@ es:
   label_realtime_editor_private_notes: Tu comentario es privado
   label_realtime_editor_posted_by: "%{name} publicó este texto como comentario."
   label_realtime_editor_reload: Recargá la página para verlo
+  label_realtime_editor_changed_by: "cambiado por %{name}"

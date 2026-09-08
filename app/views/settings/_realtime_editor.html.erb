@@ -2,7 +2,7 @@
 
 <fieldset class="box">
   <legend><%= l(:label_realtime_editor_targets) %></legend>
-  <% %w[issue_description issue_notes journal_notes wiki].each do |kind| %>
+  <% RedmineRealtimeEditor::Settings::TARGETS.each do |kind| %>
     <p>
       <label><%= l(:"label_realtime_editor_target_#{kind}") %></label>
       <%= hidden_field_tag "settings[enable_#{kind}]", '0', id: nil %>

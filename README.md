@@ -1,15 +1,16 @@
 # Redmine Realtime Editor [![Test](https://github.com/jperelli/redmine_realtime_editor/actions/workflows/test.yml/badge.svg)](https://github.com/jperelli/redmine_realtime_editor/actions/workflows/test.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-**Google-Docs style co-editing of issue descriptions, comments and wiki pages, with no extra infrastructure.** When two people open the same field, every keystroke shows up in the other browser within a second, both texts converge (Yjs CRDT, no "last write wins"), you see the other editors' carets and selections in their own colour with their name, and a small bar under the textarea shows who else is editing and who is typing. Saving works exactly as before: Redmine's form, permissions, journals and history are untouched.
+**Google-Docs style co-editing of issues, comments and wiki pages, with no extra infrastructure.** When two people open the same issue form, every keystroke in the description shows up in the other browser within a second, both texts converge (Yjs CRDT, no "last write wins"), you see the other editors' carets and selections in their own colour with their name, and a small bar under the textarea shows who else is editing and who is typing. Every other field of the form (status, assignee, dates, custom fields...) follows too: change the priority and the other editors' selects flip with a "changed by Alice" mark. Saving works exactly as before: Redmine's form, permissions, journals and history are untouched.
 
 The difference with [redmine_yjs](https://www.redmine.org/plugins/redmine_yjs) is the transport. That plugin needs a separate websocket server (Node/y-websocket) next to Redmine, a port, a reverse proxy rule, TLS, process supervision... This plugin talks to **Redmine itself over plain HTTP polling** (optionally long polling). Install the plugin, restart Redmine, done. It works behind any reverse proxy, on shared hosts, and wherever you cannot open ports or run extra daemons.
 
-- Shared fields: issue description, issue notes (new comment), editing an existing comment, wiki pages (including section editing).
+- Shared text: issue description, issue notes (new comment), editing an existing comment, wiki pages (including section editing).
+- Shared issue fields: everything else in the issue edit form (tracker, subject, status, priority, assignee, parent, dates, estimated time, % done, private flag, custom fields, every select/checkbox/radio/text input). The native controls stay in place; a remote change is applied to them and marked "changed by Alice" for a few seconds. Redmine's own form refresh on status/tracker/project change keeps working and the shared values survive it.
 - New comments are *private* by default (you only see that someone else is writing one); switch them to *shared* to co-write one comment. When somebody posts a shared comment the other editors get a banner naming them and their notes box is locked until they reload.
 - Remote carets and selections drawn over the textarea, one colour per user, name label while they move. The textarea stays Redmine's own: toolbar, preview, attachments and drag-and-drop keep working.
 - Presence bar: live/offline state, "Also editing: Alice, Bob", typing indicator.
 - Shared drafts survive a page reload and are discarded a configurable time after everybody leaves.
-- Saving a co-edited description or wiki page does **not** trigger Redmine's "updated by another user" conflict for the other editors; unrelated changes (status, assignee...) still do.
+- Saving from a co-edited issue form does **not** trigger Redmine's "updated by another user" conflict for the other editors: they already have every value that was saved. Changes made elsewhere (API, bulk edit, a form that does not share the fields) still do.
 - No new permissions: you can co-edit exactly the fields you can already edit.
 - No cron, no background job, no websocket, no extra process. Only three small tables.
 - Redmine 5.1 to 7.0 (tested in CI), MIT license.
@@ -18,7 +19,9 @@ The difference with [redmine_yjs](https://www.redmine.org/plugins/redmine_yjs) i
 
 Each browser tab runs a [Yjs](https://yjs.dev/) document bound to the textarea. Local edits become small binary updates that the tab POSTs to `/realtime_editor/sync`, a normal Redmine controller. The server does not understand Yjs: it authorizes the request with Redmine's own visibility/edit checks, appends the update to an ordered log for that document and returns every update the tab has not seen yet, plus who else is on the document. Tabs poll every second while somebody else is editing, every 3 seconds when alone, every 20 seconds in background tabs (all configurable). Because Yjs is a CRDT, updates can arrive in any order and every tab ends up with the same text.
 
-The draft is transient: when the field is saved through Redmine's normal form, the text lands where it always did (issue, journal, wiki content) and the draft is reset or its version hint updated. Drafts nobody touches for 30 minutes (configurable) are discarded on the next request, so no cleanup task is needed.
+The other issue fields share one more document per form: a Yjs map *field name => value* bound to the native inputs and selects of `#all_attributes`, last write wins per field. Writing a remote value into a control fires its `change` event, so Redmine's own behaviour (refreshing the form when status, tracker or project change) runs as if the user had picked it; the plugin re-applies the shared values once the refreshed form arrives.
+
+The draft is transient: when the field is saved through Redmine's normal form, the text lands where it always did (issue, journal, wiki content) and the draft is reset or its version hint updated. The field map is dropped as soon as the issue changes without going through a collaborative form (API, bulk edit). Drafts nobody touches for 30 minutes (configurable) are discarded on the next request, so no cleanup task is needed.
 
 ### Long polling
 
@@ -51,7 +54,7 @@ rm -rf plugins/redmine_realtime_editor
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| Collaborative fields | all on | Which fields are shared: issue description, issue notes, editing a comment, wiki pages |
+| Collaborative fields | all on | Which fields are shared: issue description, other issue fields, issue notes, editing a comment, wiki pages |
 | New comments are | private | *Private*: each user writes their own comment, the others only see who is writing. *Shared*: everybody co-writes one comment, posted by whoever submits; the others are then locked out with a banner until they reload |
 | Poll period with other editors | 1000 ms | How often a tab asks for changes while somebody else has the field open |
 | Poll period when alone | 3000 ms | How often a tab checks whether somebody joined |

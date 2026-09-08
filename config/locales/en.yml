@@ -1,6 +1,7 @@
 en:
   label_realtime_editor_targets: Collaborative fields
   label_realtime_editor_target_issue_description: Issue description
+  label_realtime_editor_target_issue_attributes: Other issue fields (status, assignee, dates, custom fields…)
   label_realtime_editor_target_issue_notes: Issue notes (new comment)
   label_realtime_editor_target_journal_notes: Editing an existing comment
   label_realtime_editor_target_wiki: Wiki pages
@@ -37,3 +38,4 @@ en:
   label_realtime_editor_private_notes: Your comment is private
   label_realtime_editor_posted_by: "%{name} posted this text as a comment."
   label_realtime_editor_reload: Reload the page to see it
+  label_realtime_editor_changed_by: "changed by %{name}"

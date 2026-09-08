@@ -4,6 +4,7 @@ module RedmineRealtimeEditor
   # the client from the form it is attached to:
   #
   #   issue:123:description        description of issue #123
+  #   issue:123:attributes         every other field of the issue #123 edit form
   #   issue:123:notes              the "Notes" field on the issue #123 edit form
   #   journal:456:notes            inline editing of journal #456
   #   wiki:<project>:<Title>       wiki page (may not exist yet)
@@ -52,6 +53,12 @@ module RedmineRealtimeEditor
 
         Target.new(key: @key, kind: 'issue_description', saved_text: issue.description.to_s,
                    version: issue.lock_version, record: issue)
+      when 'attributes'
+        return nil unless Settings.enabled?(:issue_attributes) && issue.attributes_editable?(@user)
+
+        # A map field => value kept only by the browsers; the form itself holds
+        # the saved values.
+        Target.new(key: @key, kind: 'issue_attributes', saved_text: nil, version: issue.lock_version, record: issue)
       when 'notes'
         return nil unless Settings.enabled?(:issue_notes) && issue.notes_addable?(@user)
 

@@ -135,6 +135,34 @@ class RealtimeEditorControllerTest < ActionController::TestCase
     assert_equal true, json['seeded']
   end
 
+  def test_field_map_is_dropped_once_the_issue_changed_behind_its_back
+    fields = 'issue:1:attributes'
+    json = sync(key: fields)
+    assert_equal 1, json['epoch']
+    assert_nil json['saved_text']
+    json = sync(key: fields, epoch: 1, since: 0, update: 'QQ==')
+    assert_equal 1, json['last_seq']
+    doc = RealtimeEditorDocument.find_by(doc_key: fields)
+    assert_equal Issue.find(1).lock_version, doc.record_version
+
+    # Same version: the map survives the poll.
+    assert_equal ['QQ=='], sync(key: fields, epoch: 1, since: 0)['updates'].pluck('data')
+
+    # A collaborative save moves the record and the map along.
+    Issue.find(1).update!(subject: 'Renamed by API')
+    doc.record_save!(doc.record_version, Issue.find(1).lock_version)
+    assert_equal ['QQ=='], sync(key: fields, epoch: 1, since: 0)['updates'].pluck('data')
+
+    # Any other change to the issue makes the map stale.
+    Issue.find(1).update!(subject: 'Renamed again')
+    json = sync(key: fields, epoch: 1, since: 1)
+    assert_equal 2, json['epoch']
+    assert_equal true, json['epoch_changed']
+    assert_nil json['reset_by']
+    assert_equal [], json['updates']
+    assert_equal Issue.find(1).lock_version, doc.reload.record_version
+  end
+
   def test_compaction
     Setting.plugin_redmine_realtime_editor = { 'compact_after' => '10' }
     sync

@@ -12,6 +12,7 @@ class RealtimeEditorSettingsTest < Redmine::IntegrationTest
     get '/settings/plugin/redmine_realtime_editor'
     assert_response :success
     assert_select 'input[name="settings[enable_wiki]"][type=checkbox][checked]'
+    assert_select 'input[name="settings[enable_issue_attributes]"][type=checkbox][checked]'
     assert_select 'input[name="settings[long_poll_seconds]"][value="0"]'
     assert_select 'select[name="settings[notes_mode]"] option[value=private][selected]'
 
@@ -26,7 +27,7 @@ class RealtimeEditorSettingsTest < Redmine::IntegrationTest
     assert_equal 500, settings.poll_active_ms
     assert_equal settings::LONG_POLL_MAX_SECONDS, settings.long_poll_seconds, 'capped'
     assert_equal 5.minutes, settings.draft_ttl
-    assert_equal %w[issue_description issue_notes journal_notes], settings.client_config[:targets]
+    assert_equal %w[issue_description issue_attributes issue_notes journal_notes], settings.client_config[:targets]
     assert settings.notes_shared?
     assert_equal 'shared', settings.client_config[:notesMode]
   end

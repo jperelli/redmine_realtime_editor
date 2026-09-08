@@ -19,7 +19,7 @@ module RedmineRealtimeEditor
     end
 
     CLIENT_STRINGS = %w[connecting live offline alone with_others reset typing draft_loaded
-                        private_notes posted_by reload].freeze
+                        private_notes posted_by reload changed_by].freeze
     # Left in place for the browser to fill in.
     NAME_TOKEN = '%{name}'.freeze # rubocop:disable Style/FormatStringToken
 
@@ -34,25 +34,34 @@ module RedmineRealtimeEditor
     end
 
     # After a save made from a collaborative form the notes field starts over:
-    # its text is now a journal.
+    # its text is now a journal. The attribute map is kept: what it holds is
+    # now the saved state of the issue, which the forms already show (a
+    # collaborator who has not yet fetched the last change still gets it).
     #
     # Every save of the issue also tells the other editors which lock_version
-    # they may submit with. Their form still carries the old values of every
-    # attribute they are not co-editing, so the hint is only safe when the save
-    # changed nothing else: for description editors that means text only
-    # (description and/or notes), for editors of the notes field alone that
-    # means notes only. Anything else withdraws the hint and Redmine's regular
-    # conflict page takes over.
+    # they may submit with. When the save came from a form that shared all of
+    # its fields, every other editor already has each value it saved, so the
+    # hint is safe whatever changed. Otherwise their form still carries the
+    # old values of every field they are not co-editing, so the hint is only
+    # safe when the save changed nothing else: for description editors that
+    # means text only (description and/or notes), for editors of the notes
+    # field or the attribute map alone that means notes only. Anything else
+    # withdraws the hint and Redmine's regular conflict page takes over.
     def controller_issues_edit_after_save(context)
       issue = context[:issue]
       journal = context[:journal]
+      kinds = []
       each_saved_document(context[:params], issue) do |doc, target|
         doc.reset!(User.current.id) if target.kind == 'issue_notes'
+        kinds << target.kind
       end
+      shared_form = kinds.include?('issue_attributes') &&
+                    (kinds.include?('issue_description') || !description_changed?(journal))
 
       from = issue.lock_version_before_last_save || issue.lock_version
-      hint("issue:#{issue.id}:description", from, issue.lock_version, text_only_change?(journal))
-      hint("issue:#{issue.id}:notes", from, issue.lock_version, notes_only_change?(journal))
+      hint("issue:#{issue.id}:description", from, issue.lock_version, shared_form || text_only_change?(journal))
+      hint("issue:#{issue.id}:notes", from, issue.lock_version, shared_form || notes_only_change?(journal))
+      hint("issue:#{issue.id}:attributes", from, issue.lock_version, shared_form || notes_only_change?(journal))
     end
 
     def controller_journals_edit_post(context)
@@ -96,6 +105,12 @@ module RedmineRealtimeEditor
       return true if journal.nil?
 
       journal.details.all? { |detail| SAFE_DETAILS.include?(detail.property) }
+    end
+
+    def description_changed?(journal)
+      return false if journal.nil?
+
+      journal.details.any? { |detail| detail.property == 'attr' && detail.prop_key == 'description' }
     end
 
     # Yields the live documents named by the form (realtime_editor_docs[]) that

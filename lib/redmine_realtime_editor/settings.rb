@@ -3,6 +3,7 @@ module RedmineRealtimeEditor
   module Settings
     DEFAULTS = {
       'enable_issue_description' => '1',
+      'enable_issue_attributes' => '1',
       'enable_issue_notes' => '1',
       'enable_journal_notes' => '1',
       'enable_wiki' => '1',
@@ -26,6 +27,7 @@ module RedmineRealtimeEditor
       'compact_after' => '200'
     }.freeze
 
+    TARGETS = %w[issue_description issue_attributes issue_notes journal_notes wiki].freeze
     NOTES_MODES = %w[shared private].freeze
     LONG_POLL_MAX_SECONDS = 25
     MAX_UPDATE_BYTES = 4.megabytes
@@ -88,7 +90,7 @@ module RedmineRealtimeEditor
           longPoll: long_poll_seconds.positive?,
           compactAfter: compact_after,
           notesMode: notes_mode,
-          targets: %w[issue_description issue_notes journal_notes wiki].select { |k| enabled?(k) }
+          targets: TARGETS.select { |k| enabled?(k) }
         }
       end
     end

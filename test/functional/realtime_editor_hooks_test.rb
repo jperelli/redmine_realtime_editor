@@ -19,7 +19,9 @@ class RealtimeEditorHooksTest < Redmine::IntegrationTest
     assert_select 'script[src*="plugin_assets/redmine_realtime_editor/"][src*="realtime_editor"]', 2
     assert_select 'link[href*="plugin_assets/redmine_realtime_editor/"][href*="realtime_editor"]', 1
     assert_match(%r{RealtimeEditorConfig = \{.*"syncUrl":"/realtime_editor/sync"}, response.body)
-    assert_match(/"targets":\["issue_description","issue_notes","journal_notes","wiki"\]/, response.body)
+    assert_match(/"targets":\["issue_description","issue_attributes","issue_notes","journal_notes","wiki"\]/,
+                 response.body)
+    assert_match(/"changed_by":"changed by %\{name\}"/, response.body)
 
     get '/projects/ecookbook/wiki/CookBook_documentation/edit'
     assert_response :success
@@ -76,11 +78,50 @@ class RealtimeEditorHooksTest < Redmine::IntegrationTest
   def test_changing_other_attributes_withdraws_the_lock_version_hint
     doc = RealtimeEditorDocument.for_key('issue:1:description')
     doc.record_save!(0, Issue.find(1).lock_version)
+    fields = RealtimeEditorDocument.for_key('issue:1:attributes')
+    fields.append!('QQ==', 2)
 
     put '/issues/1', params: { issue: { subject: 'Renamed', lock_version: Issue.find(1).lock_version } }
     assert_redirected_to '/issues/1'
     assert_nil doc.reload.synced_version
     assert_nil doc.synced_from_version
+    assert_nil fields.reload.synced_version, 'the field map did not see this change either'
+    assert_equal 1, fields.updates.count, 'dropped by the next sync, not by the save'
+  end
+
+  def test_saving_from_a_form_sharing_every_field_is_safe_for_everybody
+    fields = RealtimeEditorDocument.for_key('issue:1:attributes')
+    fields.append!('QQ==', 2)
+    description = RealtimeEditorDocument.for_key('issue:1:description')
+    description.append!('QQ==', 2)
+    before = Issue.find(1).lock_version
+
+    put '/issues/1', params: { issue: { subject: 'Renamed', priority_id: 5, description: 'Merged text',
+                                        lock_version: before },
+                               realtime_editor_docs: ['issue:1:attributes', 'issue:1:description'] }
+    assert_redirected_to '/issues/1'
+    after = Issue.find(1).lock_version
+    assert_equal [before, after, after],
+                 [fields.reload.synced_from_version, fields.synced_version, fields.record_version]
+    assert_equal [before, after], [description.reload.synced_from_version, description.synced_version]
+    assert_equal 1, fields.epoch, 'the map is kept: it now holds the saved values'
+    assert_equal 1, fields.updates.count
+  end
+
+  def test_a_shared_form_that_did_not_share_a_changed_description_is_not_safe
+    Setting.plugin_redmine_realtime_editor = { 'enable_issue_description' => '0' }
+    fields = RealtimeEditorDocument.for_key('issue:1:attributes')
+    before = Issue.find(1).lock_version
+
+    put '/issues/1', params: { issue: { description: 'Changed alone', lock_version: before },
+                               realtime_editor_docs: ['issue:1:attributes'] }
+    assert_redirected_to '/issues/1'
+    assert_nil fields.reload.synced_version
+
+    put '/issues/1', params: { issue: { subject: 'Renamed', lock_version: Issue.find(1).lock_version },
+                               realtime_editor_docs: ['issue:1:attributes'] }
+    assert_redirected_to '/issues/1'
+    assert_equal Issue.find(1).lock_version, fields.reload.synced_version, 'no description change: safe'
   end
 
   def test_editing_a_journal_resets_its_draft

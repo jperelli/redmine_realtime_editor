@@ -35,13 +35,24 @@ class DocumentKeyTest < ActiveSupport::TestCase
     assert_not resolve('issue:1:description').presence_only
   end
 
+  def test_issue_attributes
+    target = resolve('issue:1:attributes')
+    assert_equal 'issue_attributes', target.kind
+    assert_nil target.saved_text, 'the values live in the form, the map only carries changes'
+    assert_equal Issue.find(1).lock_version, target.version
+    assert_equal Issue.find(1), target.record
+    assert_not target.presence_only
+  end
+
   def test_issue_requires_edit_permission
     Role.anonymous.remove_permission!(:add_issue_notes)
     assert_nil resolve('issue:1:description', @anonymous)
+    assert_nil resolve('issue:1:attributes', @anonymous)
     assert_nil resolve('issue:1:notes', @anonymous)
     Role.anonymous.add_permission!(:add_issue_notes)
     assert_not_nil resolve('issue:1:notes', User.anonymous)
     assert_nil resolve('issue:1:description', User.anonymous)
+    assert_nil resolve('issue:1:attributes', User.anonymous)
   end
 
   def test_invisible_or_missing_issue
@@ -79,8 +90,10 @@ class DocumentKeyTest < ActiveSupport::TestCase
   end
 
   def test_disabled_targets
-    Setting.plugin_redmine_realtime_editor = { 'enable_issue_description' => '0', 'enable_wiki' => '0' }
+    Setting.plugin_redmine_realtime_editor = { 'enable_issue_description' => '0', 'enable_wiki' => '0',
+                                               'enable_issue_attributes' => '0' }
     assert_nil resolve('issue:1:description')
+    assert_nil resolve('issue:1:attributes')
     assert_not_nil resolve('issue:1:notes')
     assert_nil resolve('wiki:ecookbook:CookBook_documentation')
   end

@@ -22,6 +22,7 @@ class RealtimeEditorController < ApplicationController
     doc = RealtimeEditorDocument.for_key(@target.key)
     maybe_cleanup
     doc.reset! if doc.last_seq.positive? && doc.stale? && doc.active_presences.none?
+    doc.rebase!(@target.version) if @target.kind == 'issue_attributes'
 
     epoch_changed = params[:epoch].present? && params[:epoch].to_i != doc.epoch
     since = epoch_changed ? 0 : params[:since].to_i

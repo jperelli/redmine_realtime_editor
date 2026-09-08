@@ -76,11 +76,11 @@ class RealtimeEditorDocument < ActiveRecord::Base
   # Drops the draft. Clients holding the old epoch notice on their next poll
   # and rejoin, starting again from the saved text. +user_id+ is who saved the
   # text (nil when the draft simply expired).
-  def reset!(user_id = nil)
+  def reset!(user_id = nil, version = record_version)
     transaction do
       updates.delete_all
       update_columns(epoch: epoch + 1, last_seq: 0, synced_version: nil, synced_from_version: nil,
-                     reset_by_id: user_id, updated_at: Time.current)
+                     reset_by_id: user_id, record_version: version, updated_at: Time.current)
     end
   end
 
@@ -89,7 +89,18 @@ class RealtimeEditorDocument < ActiveRecord::Base
   # +nil+ withdraws the hint (something else changed: let Redmine's conflict
   # page handle it).
   def record_save!(from, to)
-    update_columns(synced_from_version: from, synced_version: to)
+    attrs = { synced_from_version: from, synced_version: to }
+    attrs[:record_version] = to if to
+    update_columns(attrs)
+  end
+
+  # The draft holds changes made on top of one version of the record. When the
+  # record moved on without a collaborative save (API, bulk edit, a form that
+  # did not share this document) the draft is stale and starts over.
+  def rebase!(version)
+    return update_columns(record_version: version) if record_version.nil?
+
+    reset!(nil, version) unless record_version == version
   end
 
   def updates_since(seq)
