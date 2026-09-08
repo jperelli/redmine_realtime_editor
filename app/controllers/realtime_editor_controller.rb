@@ -28,9 +28,10 @@ class RealtimeEditorController < ApplicationController
     joining = params[:epoch].blank? || epoch_changed
 
     payload = { 'epoch' => doc.epoch }
-    payload['seeded'] = doc.seed!(params[:seed], User.current.id) if params[:seed].present? && !epoch_changed
-    doc.append!(params[:update], User.current.id) if params[:update].present? && !epoch_changed
-    if params[:snapshot].present? && !epoch_changed
+    writable = !epoch_changed && !@target.presence_only
+    payload['seeded'] = doc.seed!(params[:seed], User.current.id) if params[:seed].present? && writable
+    doc.append!(params[:update], User.current.id) if params[:update].present? && writable
+    if params[:snapshot].present? && writable
       payload['compacted'] = doc.compact!(params[:snapshot], params[:snapshot_upto].to_i, User.current.id)
     end
     if presence_wanted?
@@ -40,7 +41,10 @@ class RealtimeEditorController < ApplicationController
     updates = wait_for_updates(doc, since)
     payload['updates'] = updates.map(&:as_json)
     payload['last_seq'] = updates.last&.seq || since
-    payload['epoch_changed'] = true if epoch_changed
+    if epoch_changed
+      payload['epoch_changed'] = true
+      payload['reset_by'] = doc.reset_by&.name
+    end
     payload['saved_text'] = @target.saved_text if joining
     payload['synced_version'] = doc.synced_version
     payload['synced_from_version'] = doc.synced_from_version

@@ -102,9 +102,37 @@ class RealtimeEditorControllerTest < ActionController::TestCase
     json = sync(epoch: 1, since: 1, update: 'Qg==')
     assert_equal 2, json['epoch']
     assert_equal true, json['epoch_changed']
+    assert_nil json['reset_by']
     assert_equal Issue.find(1).description, json['saved_text']
     assert_equal [], json['updates'], 'update sent against the old epoch is dropped'
     assert_equal 0, json['last_seq']
+  end
+
+  def test_epoch_change_names_the_user_whose_save_caused_it
+    Setting.plugin_redmine_realtime_editor = { 'notes_mode' => 'shared' }
+    sync(key: 'issue:1:notes')
+    RealtimeEditorDocument.find_by(doc_key: 'issue:1:notes').reset!(3)
+
+    json = sync(key: 'issue:1:notes', epoch: 1, since: 0)
+    assert_equal true, json['epoch_changed']
+    assert_equal User.find(3).name, json['reset_by']
+    assert_not_includes sync(key: 'issue:1:notes', epoch: 2, since: 0).keys, 'reset_by'
+  end
+
+  def test_private_notes_only_share_presence
+    sync(key: 'issue:1:notes')
+    json = sync(key: 'issue:1:notes', epoch: 1, since: 0, seed: 'QQ==', update: 'Qg==', presence: '1', typing: '1')
+    assert_nil json['seeded']
+    assert_equal [], json['updates']
+    assert_equal 0, RealtimeEditorUpdate.count
+
+    other = sync(key: 'issue:1:notes', client_id: 'tab-b')
+    assert_equal [], other['updates']
+    assert_equal([[2, true]], other['presences'].map { |p| [p['user_id'], p['typing']] })
+
+    Setting.plugin_redmine_realtime_editor = { 'notes_mode' => 'shared' }
+    json = sync(key: 'issue:1:notes', epoch: 1, since: 0, seed: 'QQ==')
+    assert_equal true, json['seeded']
   end
 
   def test_compaction

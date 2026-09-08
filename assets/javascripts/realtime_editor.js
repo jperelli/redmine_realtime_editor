@@ -223,7 +223,9 @@
     return textarea.form || textarea.closest('form');
   }
 
-  // Returns {key, versionField} for a textarea we know how to share, or null.
+  // Returns {key, kind, versionField, presenceOnly} for a textarea we know how
+  // to share, or null. presenceOnly: the text stays private, only who is
+  // writing is shared (issue notes in private mode).
   function describe(textarea) {
     var form = formOf(textarea);
     var action = form ? form.getAttribute('action') || '' : '';
@@ -235,13 +237,15 @@
       if (config.targets.indexOf(kind) < 0) return null;
       return {
         key: 'issue:' + m[1] + ':' + (kind === 'issue_notes' ? 'notes' : 'description'),
-        versionField: form.querySelector('input[name="issue[lock_version]"]')
+        kind: kind,
+        versionField: form.querySelector('input[name="issue[lock_version]"]'),
+        presenceOnly: kind === 'issue_notes' && config.notesMode !== 'shared'
       };
     }
     m = textarea.id.match(/^journal_(\d+)_notes$/);
     if (m) {
       if (config.targets.indexOf('journal_notes') < 0) return null;
-      return { key: 'journal:' + m[1] + ':notes', versionField: null };
+      return { key: 'journal:' + m[1] + ':notes', kind: 'journal_notes', versionField: null };
     }
     if (textarea.id === 'content_text' && form && form.id === 'wiki_form') {
       if (config.targets.indexOf('wiki') < 0) return null;
@@ -250,7 +254,11 @@
       var section = form.querySelector('input[name="section"]');
       var key = 'wiki:' + decodeURIComponent(m[1]) + ':' + decodeURIComponent(m[2]);
       if (section && section.value) key += '/' + section.value;
-      return { key: key, versionField: section ? null : form.querySelector('input[name="content[version]"]') };
+      return {
+        key: key,
+        kind: 'wiki',
+        versionField: section ? null : form.querySelector('input[name="content[version]"]')
+      };
     }
     return null;
   }
@@ -264,9 +272,15 @@
   // (toolbar buttons, preview tab) before it disappears.
   var CURSOR_LINGER_MS = 15000;
 
+  // Notes documents are reset when somebody posts the comment; the other
+  // editors are then told so and locked out until they reload.
+  var RESET_ON_SAVE = ['issue_notes', 'journal_notes'];
+
   function Session(textarea, info) {
     this.textarea = textarea;
     this.key = info.key;
+    this.kind = info.kind;
+    this.presenceOnly = !!info.presenceOnly;
     this.versionField = info.versionField;
     this.clientId = randomId();
     this.epoch = null;
@@ -288,8 +302,8 @@
     this.ytext = null;
 
     this.buildStatusBar();
-    this.overlay = new CaretOverlay(textarea);
-    this.markForm();
+    this.overlay = this.presenceOnly ? null : new CaretOverlay(textarea);
+    if (!this.presenceOnly) this.markForm();
 
     var self = this;
     this.onInput = function () {
@@ -355,7 +369,7 @@
 
   Session.prototype.setStatus = function (state) {
     this.bar.className = 'realtime-editor-status realtime-editor-' + state;
-    this.statusText.textContent = t[state] || state;
+    this.statusText.textContent = state === 'live' && this.presenceOnly ? t.private_notes : t[state] || state;
   };
 
   Session.prototype.showNotice = function (text) {
@@ -627,13 +641,20 @@
 
   Session.prototype.handle = function (json) {
     var wasJoined = this.epoch !== null;
+    if (wasJoined && json.epoch_changed && json.reset_by && !this.presenceOnly &&
+        RESET_ON_SAVE.indexOf(this.kind) >= 0) {
+      this.posted(json.reset_by);
+      return;
+    }
     if (!wasJoined || json.epoch_changed) {
       this.epoch = json.epoch;
       this.since = json.last_seq || 0;
-      // After a reset (somebody saved) the local text is stale by definition.
-      this.rebuildDoc(json.saved_text, json.updates || [], !wasJoined);
-      if (wasJoined) this.showNotice(t.reset);
-    } else {
+      if (!this.presenceOnly) {
+        // After a reset (somebody saved) the local text is stale by definition.
+        this.rebuildDoc(json.saved_text, json.updates || [], !wasJoined);
+        if (wasJoined) this.showNotice(t.reset);
+      }
+    } else if (!this.presenceOnly) {
       this.applyRemoteUpdates(json.updates || []);
       if (json.last_seq > this.since) this.since = json.last_seq;
     }
@@ -641,7 +662,29 @@
     this.others = (json.presences || []).filter(function (p) { return p.user_id !== config.userId; });
     this.renderPeers();
     this.rememberRemoteCarets();
-    this.bumpVersion(json.synced_from_version, json.synced_version);
+    if (!this.presenceOnly) this.bumpVersion(json.synced_from_version, json.synced_version);
+  };
+
+  // The text everybody was writing has just been posted as a comment by +name+.
+  // Submitting it again would duplicate it, so the field is locked with a
+  // banner until the page is reloaded (which also shows the new comment).
+  Session.prototype.posted = function (name) {
+    var ta = this.textarea;
+    this.stop('posted');
+    ta.disabled = true;
+    ta.classList.add('realtime-editor-posted');
+    var banner = el('div', 'realtime-editor-banner');
+    banner.setAttribute('role', 'alert');
+    banner.appendChild(el('strong', null, t.posted_by.replace('%{name}', name)));
+    banner.appendChild(document.createTextNode(' '));
+    var reload = el('a', 'realtime-editor-reload', t.reload);
+    reload.href = window.location.href;
+    reload.addEventListener('click', function (e) {
+      e.preventDefault();
+      window.location.reload();
+    });
+    banner.appendChild(reload);
+    ta.insertAdjacentElement('beforebegin', banner);
   };
 
   // Lets this form save on top of a version another collaborator produced:
@@ -686,7 +729,7 @@
   // navigates; it is one small POST to the server the form is going to anyway.
   Session.prototype.syncBeforeSubmit = function () {
     this.pushLocalChanges();
-    if (this.epoch === null) return;
+    if (this.epoch === null || this.presenceOnly) return;
     if (this.inflight) this.inflight.abort();
     var body = new URLSearchParams();
     body.set('key', this.key);
@@ -754,7 +797,7 @@
     this.textarea.removeEventListener('focus', this.onSelect);
     this.textarea.removeEventListener('blur', this.onBlur);
     document.removeEventListener('selectionchange', this.onSelect);
-    this.overlay.destroy();
+    if (this.overlay) this.overlay.destroy();
     document.removeEventListener('visibilitychange', this.onVisibility);
     window.removeEventListener('pagehide', this.onPageHide);
     var form = formOf(this.textarea);
@@ -780,7 +823,7 @@
       var ta = areas[i];
       var visible = isVisible(ta);
       var session = sessions.get(ta);
-      if (visible && !session) {
+      if (visible && !session && !ta.disabled) {
         var info = describe(ta);
         if (info) sessions.set(ta, new Session(ta, info));
       } else if (session) {

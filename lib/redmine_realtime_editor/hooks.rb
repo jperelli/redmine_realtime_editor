@@ -18,7 +18,10 @@ module RedmineRealtimeEditor
       actions&.include?(controller.action_name) || false
     end
 
-    CLIENT_STRINGS = %w[connecting live offline alone with_others reset typing draft_loaded].freeze
+    CLIENT_STRINGS = %w[connecting live offline alone with_others reset typing draft_loaded
+                        private_notes posted_by reload].freeze
+    # Left in place for the browser to fill in.
+    NAME_TOKEN = '%{name}'.freeze # rubocop:disable Style/FormatStringToken
 
     def self.client_config(view)
       Settings.client_config.merge(
@@ -26,7 +29,7 @@ module RedmineRealtimeEditor
         leaveUrl: view.realtime_editor_leave_path,
         userId: User.current.id,
         userName: User.current.name,
-        i18n: CLIENT_STRINGS.to_h { |k| [k, ::I18n.t("label_realtime_editor_#{k}")] }
+        i18n: CLIENT_STRINGS.to_h { |k| [k, ::I18n.t("label_realtime_editor_#{k}", name: NAME_TOKEN)] }
       )
     end
 
@@ -44,7 +47,7 @@ module RedmineRealtimeEditor
       issue = context[:issue]
       journal = context[:journal]
       each_saved_document(context[:params], issue) do |doc, target|
-        doc.reset! if target.kind == 'issue_notes'
+        doc.reset!(User.current.id) if target.kind == 'issue_notes'
       end
 
       from = issue.lock_version_before_last_save || issue.lock_version
@@ -54,7 +57,7 @@ module RedmineRealtimeEditor
 
     def controller_journals_edit_post(context)
       each_saved_document(context[:params], context[:journal]) do |doc, target|
-        doc.reset! if target.kind == 'journal_notes'
+        doc.reset!(User.current.id) if target.kind == 'journal_notes'
       end
     end
 

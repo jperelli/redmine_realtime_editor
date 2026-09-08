@@ -9,6 +9,14 @@
       <%= check_box_tag "settings[enable_#{kind}]", '1', settings["enable_#{kind}"].to_s == '1' %>
     </p>
   <% end %>
+  <p>
+    <label><%= l(:label_realtime_editor_notes_mode) %></label>
+    <%= select_tag 'settings[notes_mode]',
+                   options_for_select(RedmineRealtimeEditor::Settings::NOTES_MODES.map { |m|
+                     [l(:"label_realtime_editor_notes_mode_#{m}"), m]
+                   }, settings['notes_mode']) %>
+    <em class="info"><%= l(:label_realtime_editor_notes_mode_info) %></em>
+  </p>
 </fieldset>
 
 <fieldset class="box">

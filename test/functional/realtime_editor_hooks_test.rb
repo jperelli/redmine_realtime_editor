@@ -49,6 +49,7 @@ class RealtimeEditorHooksTest < Redmine::IntegrationTest
     assert_redirected_to '/issues/1'
     assert_equal 2, notes.reload.epoch
     assert_equal 0, notes.updates.count
+    assert_equal User.find(2), notes.reset_by
     assert_equal 1, other.reload.epoch, 'documents of other issues are untouched'
 
     after = Issue.find(1).lock_version
@@ -90,6 +91,17 @@ class RealtimeEditorHooksTest < Redmine::IntegrationTest
     put '/journals/1', params: { journal: { notes: 'Edited' }, realtime_editor_docs: ['journal:1:notes'] }
     assert_response :redirect
     assert_equal 2, doc.reload.epoch
+    assert_equal 2, doc.reset_by_id
+  end
+
+  def test_client_config_carries_the_notes_mode_and_the_banner_strings
+    get '/issues/1'
+    assert_match(/"notesMode":"private"/, response.body)
+    assert_match(/"posted_by":"%\{name\} posted this text as a comment\."/, response.body)
+
+    Setting.plugin_redmine_realtime_editor = { 'notes_mode' => 'shared' }
+    get '/issues/1'
+    assert_match(/"notesMode":"shared"/, response.body)
   end
 
   def test_saving_a_wiki_page_publishes_the_new_version

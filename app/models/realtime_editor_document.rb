@@ -7,6 +7,7 @@ class RealtimeEditorDocument < ActiveRecord::Base
                      inverse_of: :document, dependent: :delete_all
   has_many :presences, class_name: 'RealtimeEditorPresence', foreign_key: :document_id,
                        inverse_of: :document, dependent: :delete_all
+  belongs_to :reset_by, class_name: 'User', optional: true
 
   validates :doc_key, presence: true, length: { maximum: 255 }
 
@@ -73,12 +74,13 @@ class RealtimeEditorDocument < ActiveRecord::Base
   end
 
   # Drops the draft. Clients holding the old epoch notice on their next poll
-  # and rejoin, starting again from the saved text.
-  def reset!
+  # and rejoin, starting again from the saved text. +user_id+ is who saved the
+  # text (nil when the draft simply expired).
+  def reset!(user_id = nil)
     transaction do
       updates.delete_all
       update_columns(epoch: epoch + 1, last_seq: 0, synced_version: nil, synced_from_version: nil,
-                     updated_at: Time.current)
+                     reset_by_id: user_id, updated_at: Time.current)
     end
   end
 

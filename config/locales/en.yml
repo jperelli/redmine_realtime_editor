@@ -4,6 +4,10 @@ en:
   label_realtime_editor_target_issue_notes: Issue notes (new comment)
   label_realtime_editor_target_journal_notes: Editing an existing comment
   label_realtime_editor_target_wiki: Wiki pages
+  label_realtime_editor_notes_mode: New comments are
+  label_realtime_editor_notes_mode_shared: "Shared: everyone co-writes one comment, posted by whoever submits"
+  label_realtime_editor_notes_mode_private: "Private: each user writes their own comment, others only see that they are writing"
+  label_realtime_editor_notes_mode_info: When shared, the other editors' notes box is locked once someone posts the comment, until they reload the page.
   label_realtime_editor_polling: Synchronization
   label_realtime_editor_poll_active_ms: Poll period with other editors
   label_realtime_editor_poll_active_ms_info: How often the browser asks for changes while someone else has the same field open.
@@ -30,3 +34,6 @@ en:
   label_realtime_editor_typing: typing
   label_realtime_editor_draft_loaded: A shared draft with unsaved changes was loaded.
   label_realtime_editor_reset: The text was saved by someone else; the editor was refreshed.
+  label_realtime_editor_private_notes: Your comment is private
+  label_realtime_editor_posted_by: "%{name} posted this text as a comment."
+  label_realtime_editor_reload: Reload the page to see it

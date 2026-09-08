@@ -12,7 +12,9 @@ module RedmineRealtimeEditor
   # Access is decided with the same checks Redmine applies to the form itself,
   # so the plugin does not add permissions of its own.
   class DocumentKey
-    Target = Struct.new(:key, :kind, :saved_text, :version, :record, keyword_init: true)
+    # presence_only: the field is not shared, the document only tracks who is
+    # writing in it (issue notes in private mode).
+    Target = Struct.new(:key, :kind, :saved_text, :version, :record, :presence_only, keyword_init: true)
 
     MAX_LENGTH = 255
 
@@ -53,7 +55,8 @@ module RedmineRealtimeEditor
       when 'notes'
         return nil unless Settings.enabled?(:issue_notes) && issue.notes_addable?(@user)
 
-        Target.new(key: @key, kind: 'issue_notes', saved_text: nil, version: nil, record: issue)
+        Target.new(key: @key, kind: 'issue_notes', saved_text: nil, version: nil, record: issue,
+                   presence_only: !Settings.notes_shared?)
       end
     end
 

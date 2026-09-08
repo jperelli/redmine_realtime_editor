@@ -28,6 +28,11 @@ class DocumentKeyTest < ActiveSupport::TestCase
     target = resolve('issue:1:notes')
     assert_equal 'issue_notes', target.kind
     assert_nil target.saved_text
+    assert target.presence_only, 'private by default'
+
+    Setting.plugin_redmine_realtime_editor = { 'notes_mode' => 'shared' }
+    assert_not resolve('issue:1:notes').presence_only
+    assert_not resolve('issue:1:description').presence_only
   end
 
   def test_issue_requires_edit_permission

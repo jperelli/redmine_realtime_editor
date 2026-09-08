@@ -5,6 +5,7 @@
 The difference with [redmine_yjs](https://www.redmine.org/plugins/redmine_yjs) is the transport. That plugin needs a separate websocket server (Node/y-websocket) next to Redmine, a port, a reverse proxy rule, TLS, process supervision... This plugin talks to **Redmine itself over plain HTTP polling** (optionally long polling). Install the plugin, restart Redmine, done. It works behind any reverse proxy, on shared hosts, and wherever you cannot open ports or run extra daemons.
 
 - Shared fields: issue description, issue notes (new comment), editing an existing comment, wiki pages (including section editing).
+- New comments are *private* by default (you only see that someone else is writing one); switch them to *shared* to co-write one comment. When somebody posts a shared comment the other editors get a banner naming them and their notes box is locked until they reload.
 - Remote carets and selections drawn over the textarea, one colour per user, name label while they move. The textarea stays Redmine's own: toolbar, preview, attachments and drag-and-drop keep working.
 - Presence bar: live/offline state, "Also editing: Alice, Bob", typing indicator.
 - Shared drafts survive a page reload and are discarded a configurable time after everybody leaves.
@@ -51,6 +52,7 @@ rm -rf plugins/redmine_realtime_editor
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | Collaborative fields | all on | Which fields are shared: issue description, issue notes, editing a comment, wiki pages |
+| New comments are | private | *Private*: each user writes their own comment, the others only see who is writing. *Shared*: everybody co-writes one comment, posted by whoever submits; the others are then locked out with a banner until they reload |
 | Poll period with other editors | 1000 ms | How often a tab asks for changes while somebody else has the field open |
 | Poll period when alone | 3000 ms | How often a tab checks whether somebody joined |
 | Poll period in background tabs | 20000 ms | Keeps the draft alive while the tab is hidden |

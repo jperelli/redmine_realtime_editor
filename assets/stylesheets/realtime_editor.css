@@ -79,6 +79,30 @@
   color: #999;
 }
 
+/* Somebody posted the shared comment: the field is locked until reload. */
+.realtime-editor-banner {
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0.3em 0;
+  padding: 0.6em 0.8em;
+  border: 1px solid #e4b400;
+  border-left-width: 6px;
+  border-radius: 3px;
+  background: #fff6cc;
+  color: #4a3b00;
+  font-size: 1em;
+  line-height: 1.5;
+}
+
+.realtime-editor-banner .realtime-editor-reload {
+  font-weight: bold;
+  white-space: nowrap;
+}
+
+textarea.realtime-editor-posted {
+  opacity: 0.55;
+}
+
 /* Remote carets: a transparent mirror of the textarea's text laid over it. */
 .realtime-editor-carets {
   position: absolute;

@@ -4,6 +4,10 @@ es:
   label_realtime_editor_target_issue_notes: Notas de la petición (comentario nuevo)
   label_realtime_editor_target_journal_notes: Edición de un comentario existente
   label_realtime_editor_target_wiki: Páginas wiki
+  label_realtime_editor_notes_mode: Los comentarios nuevos son
+  label_realtime_editor_notes_mode_shared: "Compartidos: todos escriben un mismo comentario, que publica quien envía el formulario"
+  label_realtime_editor_notes_mode_private: "Privados: cada usuario escribe su propio comentario, los demás solo ven que está escribiendo"
+  label_realtime_editor_notes_mode_info: En modo compartido, la caja de notas de los demás editores se bloquea cuando alguien publica el comentario, hasta que recargan la página.
   label_realtime_editor_polling: Sincronización
   label_realtime_editor_poll_active_ms: Periodo de consulta con otros editores
   label_realtime_editor_poll_active_ms_info: Cada cuánto el navegador pide cambios mientras otra persona tiene el mismo campo abierto.
@@ -30,3 +34,6 @@ es:
   label_realtime_editor_typing: escribiendo
   label_realtime_editor_draft_loaded: Se cargó un borrador compartido con cambios sin guardar.
   label_realtime_editor_reset: Otra persona guardó el texto; el editor se actualizó.
+  label_realtime_editor_private_notes: Tu comentario es privado
+  label_realtime_editor_posted_by: "%{name} publicó este texto como comentario."
+  label_realtime_editor_reload: Recargá la página para verlo

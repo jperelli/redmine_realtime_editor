@@ -16,6 +16,9 @@ class CreateRealtimeEditorTables < ActiveRecord::Migration[6.1]
       # ...and the version that save started from: the hint is only good for
       # editors whose form was rendered at exactly that version.
       t.integer :synced_from_version
+      # User whose save caused the last reset (nil for a lifetime reset), so
+      # the other editors can be told who posted the text.
+      t.integer :reset_by_id
       t.timestamps null: false
     end
     add_index :realtime_editor_documents, :doc_key, unique: true
