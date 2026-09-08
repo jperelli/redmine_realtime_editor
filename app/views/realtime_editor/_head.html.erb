@@ -1,0 +1,5 @@
+<% if User.current.logged? && RedmineRealtimeEditor::Hooks.collaborative_page?(controller) %>
+  <%= javascript_tag "window.RealtimeEditorConfig = #{RedmineRealtimeEditor::Hooks.client_config(self).to_json};" %>
+  <%= javascript_include_tag 'realtime_editor_yjs', 'realtime_editor', plugin: 'redmine_realtime_editor', defer: true %>
+  <%= stylesheet_link_tag 'realtime_editor', plugin: 'redmine_realtime_editor' %>
+<% end %>

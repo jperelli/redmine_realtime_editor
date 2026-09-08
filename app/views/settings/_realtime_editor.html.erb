@@ -1,0 +1,58 @@
+<% settings = RedmineRealtimeEditor::Settings::DEFAULTS.merge(@settings.to_h.stringify_keys) %>
+
+<fieldset class="box">
+  <legend><%= l(:label_realtime_editor_targets) %></legend>
+  <% %w[issue_description issue_notes journal_notes wiki].each do |kind| %>
+    <p>
+      <label><%= l(:"label_realtime_editor_target_#{kind}") %></label>
+      <%= hidden_field_tag "settings[enable_#{kind}]", '0', id: nil %>
+      <%= check_box_tag "settings[enable_#{kind}]", '1', settings["enable_#{kind}"].to_s == '1' %>
+    </p>
+  <% end %>
+</fieldset>
+
+<fieldset class="box">
+  <legend><%= l(:label_realtime_editor_polling) %></legend>
+  <p>
+    <label><%= l(:label_realtime_editor_poll_active_ms) %></label>
+    <%= number_field_tag 'settings[poll_active_ms]', settings['poll_active_ms'], min: 250, step: 50, size: 6 %> ms
+    <em class="info"><%= l(:label_realtime_editor_poll_active_ms_info) %></em>
+  </p>
+  <p>
+    <label><%= l(:label_realtime_editor_poll_idle_ms) %></label>
+    <%= number_field_tag 'settings[poll_idle_ms]', settings['poll_idle_ms'], min: 250, step: 50, size: 6 %> ms
+    <em class="info"><%= l(:label_realtime_editor_poll_idle_ms_info) %></em>
+  </p>
+  <p>
+    <label><%= l(:label_realtime_editor_poll_hidden_ms) %></label>
+    <%= number_field_tag 'settings[poll_hidden_ms]', settings['poll_hidden_ms'], min: 1000, step: 1000, size: 6 %> ms
+    <em class="info"><%= l(:label_realtime_editor_poll_hidden_ms_info) %></em>
+  </p>
+  <p>
+    <label><%= l(:label_realtime_editor_long_poll_seconds) %></label>
+    <%= number_field_tag 'settings[long_poll_seconds]', settings['long_poll_seconds'],
+                         min: 0, max: RedmineRealtimeEditor::Settings::LONG_POLL_MAX_SECONDS, size: 6 %> s
+    <em class="info"><%= l(:label_realtime_editor_long_poll_seconds_info) %></em>
+  </p>
+</fieldset>
+
+<fieldset class="box">
+  <legend><%= l(:label_realtime_editor_storage) %></legend>
+  <p>
+    <label><%= l(:label_realtime_editor_draft_ttl_minutes) %></label>
+    <%= number_field_tag 'settings[draft_ttl_minutes]', settings['draft_ttl_minutes'], min: 1, size: 6 %>
+    <%= l(:label_realtime_editor_minutes) %>
+    <em class="info"><%= l(:label_realtime_editor_draft_ttl_minutes_info) %></em>
+  </p>
+  <p>
+    <label><%= l(:label_realtime_editor_compact_after) %></label>
+    <%= number_field_tag 'settings[compact_after]', settings['compact_after'], min: 10, size: 6 %>
+    <em class="info"><%= l(:label_realtime_editor_compact_after_info) %></em>
+  </p>
+  <p>
+    <em class="info">
+      <%= l(:label_realtime_editor_live_documents, count: RealtimeEditorDocument.count,
+                                                    updates: RealtimeEditorUpdate.count) %>
+    </em>
+  </p>
+</fieldset>

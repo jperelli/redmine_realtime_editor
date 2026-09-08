@@ -1,0 +1,15 @@
+{
+  "name": "redmine_realtime_editor-frontend",
+  "private": true,
+  "description": "Builds the Yjs bundle shipped in ../assets/javascripts/realtime_editor_yjs.js",
+  "scripts": {
+    "build": "esbuild src/yjs_entry.js --bundle --minify --format=iife --global-name=RealtimeEditorYjs --target=es2018 --legal-comments=inline --outfile=../assets/javascripts/realtime_editor_yjs.js",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "yjs": "13.6.32"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

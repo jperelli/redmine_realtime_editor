@@ -1,0 +1,104 @@
+# Redmine Realtime Editor [![Test](https://github.com/jperelli/redmine_realtime_editor/actions/workflows/test.yml/badge.svg)](https://github.com/jperelli/redmine_realtime_editor/actions/workflows/test.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+
+**Google-Docs style co-editing of issue descriptions, comments and wiki pages, with no extra infrastructure.** When two people open the same field, every keystroke shows up in the other browser within a second, both texts converge (Yjs CRDT, no "last write wins"), and a small bar under the textarea shows who else is editing and who is typing. Saving works exactly as before: Redmine's form, permissions, journals and history are untouched.
+
+The difference with [redmine_yjs](https://www.redmine.org/plugins/redmine_yjs) is the transport. That plugin needs a separate websocket server (Node/y-websocket) next to Redmine, a port, a reverse proxy rule, TLS, process supervision... This plugin talks to **Redmine itself over plain HTTP polling** (optionally long polling). Install the plugin, restart Redmine, done. It works behind any reverse proxy, on shared hosts, and wherever you cannot open ports or run extra daemons.
+
+- Shared fields: issue description, issue notes (new comment), editing an existing comment, wiki pages (including section editing).
+- Presence bar: live/offline state, "Also editing: Alice, Bob", typing indicator.
+- Shared drafts survive a page reload and are discarded a configurable time after everybody leaves.
+- Saving a co-edited description or wiki page does **not** trigger Redmine's "updated by another user" conflict for the other editors; unrelated changes (status, assignee...) still do.
+- No new permissions: you can co-edit exactly the fields you can already edit.
+- No cron, no background job, no websocket, no extra process. Only three small tables.
+- Redmine 5.1 to 7.0 (tested in CI), MIT license.
+
+## How it works
+
+Each browser tab runs a [Yjs](https://yjs.dev/) document bound to the textarea. Local edits become small binary updates that the tab POSTs to `/realtime_editor/sync`, a normal Redmine controller. The server does not understand Yjs: it authorizes the request with Redmine's own visibility/edit checks, appends the update to an ordered log for that document and returns every update the tab has not seen yet, plus who else is on the document. Tabs poll every second while somebody else is editing, every 3 seconds when alone, every 20 seconds in background tabs (all configurable). Because Yjs is a CRDT, updates can arrive in any order and every tab ends up with the same text.
+
+The draft is transient: when the field is saved through Redmine's normal form, the text lands where it always did (issue, journal, wiki content) and the draft is reset or its version hint updated. Drafts nobody touches for 30 minutes (configurable) are discarded on the next request, so no cleanup task is needed.
+
+### Long polling
+
+By default the plugin uses plain polling: each request returns immediately. In *Administration > Plugins > Redmine Realtime Editor > Configure* you can set a *long polling hold* of up to 25 seconds: the server then keeps each poll open until a change arrives, which lowers latency and request count. Every waiting request occupies an application server thread (Puma ships with 5), so only enable it if your server has threads to spare.
+
+## Installation
+
+```bash
+cd /path/to/redmine/plugins
+git clone https://github.com/jperelli/redmine_realtime_editor.git
+cd /path/to/redmine
+bundle exec rake redmine:plugins:migrate RAILS_ENV=production
+```
+
+Restart Redmine. Open an issue in two browsers, click *Edit* in both and start typing.
+
+The Yjs bundle is committed (`assets/javascripts/realtime_editor_yjs.js`), so **no Node.js is needed** to install or run the plugin. Node is only required if you want to rebuild it (see below).
+
+### Uninstall
+
+```bash
+cd /path/to/redmine
+bundle exec rake redmine:plugins:migrate NAME=redmine_realtime_editor VERSION=0 RAILS_ENV=production
+rm -rf plugins/redmine_realtime_editor
+```
+
+## Settings
+
+*Administration > Plugins > Redmine Realtime Editor > Configure*
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| Collaborative fields | all on | Which fields are shared: issue description, issue notes, editing a comment, wiki pages |
+| Poll period with other editors | 1000 ms | How often a tab asks for changes while somebody else has the field open |
+| Poll period when alone | 3000 ms | How often a tab checks whether somebody joined |
+| Poll period in background tabs | 20000 ms | Keeps the draft alive while the tab is hidden |
+| Long polling hold | 0 s (off) | Seconds the server keeps each poll open waiting for changes, max 25 |
+| Draft lifetime | 30 min | A draft nobody has open for this long is discarded |
+| Compact after | 200 | Stored changes after which a browser replaces the log with one merged snapshot |
+
+## Development
+
+Requirements: Docker and Docker Compose. Ruby is not needed on the host.
+
+```bash
+docker compose build
+./provision.sh            # sqlite db, plugin migration, default data, project1, users alice/bob (password123)
+docker compose up -d redmine
+```
+
+Redmine is at http://localhost:3000 (admin/admin). Open an issue as admin in one browser and as alice in a private window to see the synchronization.
+
+The plugin directory is mounted into the container. Changes to views, assets and controllers are picked up on reload; changes to `init.rb` or `lib/` need `docker compose restart redmine`.
+
+### Frontend
+
+`frontend/` holds the esbuild setup that bundles Yjs into `assets/javascripts/realtime_editor_yjs.js`. The plugin's own client code is plain ES5 in `assets/javascripts/realtime_editor.js` and needs no build step.
+
+```bash
+cd frontend
+npm ci
+npm run build   # regenerates ../assets/javascripts/realtime_editor_yjs.js
+npm test        # checks the committed bundle
+```
+
+CI fails if the committed bundle differs from a fresh build.
+
+### Tests and lint
+
+```bash
+docker build -f Dockerfile.test -t redmine_realtime_editor-test .   # add --build-arg REDMINE_TAG=5.1-bookworm etc.
+docker run --rm redmine_realtime_editor-test
+docker run --rm -v "$PWD":/plugin -w /plugin ruby:3.4 sh -c 'gem install rubocop -v 1.81.1 --no-document && rubocop'
+```
+
+## Limitations
+
+- The polling latency is the configured poll period (1 s by default), not the ~50 ms of a websocket. For co-editing text this is barely noticeable.
+- Only `textarea` fields are shared. Redmine's other inputs (subject, status, custom fields) are not.
+- Cursor positions of other editors are not shown, only their presence and typing state.
+- Each poll is a regular Redmine request. With N editors on a field that is N requests per second at the default settings; the requests are small and touch only the plugin tables.
+
+## License
+
+MIT, see [LICENSE](LICENSE).

@@ -1,0 +1,62 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.4'
+
+      - name: Install RuboCop
+        run: gem install rubocop -v 1.81.1 --no-document
+
+      - name: Run RuboCop
+        run: rubocop
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Rebuild the Yjs bundle and check it is committed
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+          git diff --exit-code -- ../assets/javascripts/realtime_editor_yjs.js
+
+      - name: Run client tests
+        working-directory: frontend
+        run: npm test
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        redmine-tag:
+          - '5.1-bookworm'
+          - '6.0-bookworm'
+          - '6.1-bookworm'
+          - '7.0-bookworm'
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build test image
+        run: docker build -f Dockerfile.test --build-arg REDMINE_TAG=${{ matrix.redmine-tag }} -t redmine_realtime_editor-test .
+
+      - name: Run plugin tests
+        run: docker run --rm redmine_realtime_editor-test

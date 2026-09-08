@@ -1,0 +1,32 @@
+en:
+  label_realtime_editor_targets: Collaborative fields
+  label_realtime_editor_target_issue_description: Issue description
+  label_realtime_editor_target_issue_notes: Issue notes (new comment)
+  label_realtime_editor_target_journal_notes: Editing an existing comment
+  label_realtime_editor_target_wiki: Wiki pages
+  label_realtime_editor_polling: Synchronization
+  label_realtime_editor_poll_active_ms: Poll period with other editors
+  label_realtime_editor_poll_active_ms_info: How often the browser asks for changes while someone else has the same field open.
+  label_realtime_editor_poll_idle_ms: Poll period when alone
+  label_realtime_editor_poll_idle_ms_info: How often the browser checks whether someone else joined.
+  label_realtime_editor_poll_hidden_ms: Poll period in background tabs
+  label_realtime_editor_poll_hidden_ms_info: Keeps the draft alive while the tab is not visible.
+  label_realtime_editor_long_poll_seconds: Long polling hold
+  label_realtime_editor_long_poll_seconds_info: "Seconds the server keeps each poll open waiting for changes (0 = plain polling). Lower latency, but every waiting editor occupies one application server thread (Puma has 5 by default), so only enable it if your server has threads to spare."
+  label_realtime_editor_storage: Drafts
+  label_realtime_editor_draft_ttl_minutes: Draft lifetime
+  label_realtime_editor_draft_ttl_minutes_info: A shared draft nobody has open for this long is discarded; the next editor starts from the saved text.
+  label_realtime_editor_compact_after: Compact after
+  label_realtime_editor_compact_after_info: Number of stored changes after which a browser replaces them with one merged snapshot.
+  label_realtime_editor_minutes: minutes
+  label_realtime_editor_live_documents:
+    one: "1 live document (%{updates} stored changes)."
+    other: "%{count} live documents (%{updates} stored changes)."
+  label_realtime_editor_connecting: Connecting…
+  label_realtime_editor_live: Live
+  label_realtime_editor_offline: Offline, retrying…
+  label_realtime_editor_alone: Nobody else is editing
+  label_realtime_editor_with_others: "Also editing:"
+  label_realtime_editor_typing: typing
+  label_realtime_editor_draft_loaded: A shared draft with unsaved changes was loaded.
+  label_realtime_editor_reset: The text was saved by someone else; the editor was refreshed.

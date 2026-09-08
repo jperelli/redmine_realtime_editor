@@ -1,0 +1,32 @@
+es:
+  label_realtime_editor_targets: Campos colaborativos
+  label_realtime_editor_target_issue_description: Descripción de la petición
+  label_realtime_editor_target_issue_notes: Notas de la petición (comentario nuevo)
+  label_realtime_editor_target_journal_notes: Edición de un comentario existente
+  label_realtime_editor_target_wiki: Páginas wiki
+  label_realtime_editor_polling: Sincronización
+  label_realtime_editor_poll_active_ms: Periodo de consulta con otros editores
+  label_realtime_editor_poll_active_ms_info: Cada cuánto el navegador pide cambios mientras otra persona tiene el mismo campo abierto.
+  label_realtime_editor_poll_idle_ms: Periodo de consulta en solitario
+  label_realtime_editor_poll_idle_ms_info: Cada cuánto el navegador comprueba si alguien más se unió.
+  label_realtime_editor_poll_hidden_ms: Periodo de consulta en pestañas de fondo
+  label_realtime_editor_poll_hidden_ms_info: Mantiene vivo el borrador mientras la pestaña no está visible.
+  label_realtime_editor_long_poll_seconds: Espera de long polling
+  label_realtime_editor_long_poll_seconds_info: "Segundos que el servidor mantiene abierta cada consulta esperando cambios (0 = consulta simple). Menor latencia, pero cada editor en espera ocupa un hilo del servidor de aplicaciones (Puma tiene 5 por defecto): activalo solo si tu servidor tiene hilos de sobra."
+  label_realtime_editor_storage: Borradores
+  label_realtime_editor_draft_ttl_minutes: Duración del borrador
+  label_realtime_editor_draft_ttl_minutes_info: Un borrador compartido que nadie tiene abierto durante este tiempo se descarta; el siguiente editor parte del texto guardado.
+  label_realtime_editor_compact_after: Compactar después de
+  label_realtime_editor_compact_after_info: Cantidad de cambios almacenados a partir de la cual un navegador los reemplaza por una única instantánea combinada.
+  label_realtime_editor_minutes: minutos
+  label_realtime_editor_live_documents:
+    one: "1 documento activo (%{updates} cambios almacenados)."
+    other: "%{count} documentos activos (%{updates} cambios almacenados)."
+  label_realtime_editor_connecting: Conectando…
+  label_realtime_editor_live: En vivo
+  label_realtime_editor_offline: Sin conexión, reintentando…
+  label_realtime_editor_alone: Nadie más está editando
+  label_realtime_editor_with_others: "También editando:"
+  label_realtime_editor_typing: escribiendo
+  label_realtime_editor_draft_loaded: Se cargó un borrador compartido con cambios sin guardar.
+  label_realtime_editor_reset: Otra persona guardó el texto; el editor se actualizó.
