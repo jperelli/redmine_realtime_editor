@@ -78,3 +78,59 @@
   text-decoration: none;
   color: #999;
 }
+
+/* Remote carets: a transparent mirror of the textarea's text laid over it. */
+.realtime-editor-carets {
+  position: absolute;
+  margin: 0;
+  border: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+  pointer-events: none;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  color: transparent;
+  background: transparent;
+  text-align: start;
+  z-index: 1;
+}
+
+.realtime-editor-selection {
+  border-radius: 2px;
+}
+
+.realtime-editor-caret {
+  position: relative;
+  display: inline-block;
+  width: 0;
+  height: 1.15em;
+  vertical-align: text-bottom;
+  border-left: 2px solid;
+  margin-left: -1px;
+}
+
+.realtime-editor-caret-name {
+  position: absolute;
+  left: -2px;
+  bottom: 100%;
+  padding: 0 4px;
+  border-radius: 3px 3px 3px 0;
+  font-family: var(--fonts-main, "Noto Sans", Verdana, sans-serif);
+  font-size: 10px;
+  font-weight: normal;
+  line-height: 14px;
+  white-space: nowrap;
+  color: #fff;
+  opacity: 0.92;
+}
+
+.realtime-editor-caret-quiet .realtime-editor-caret-name {
+  opacity: 0;
+}
+
+.realtime-editor-caret-below .realtime-editor-caret-name {
+  bottom: auto;
+  top: 100%;
+  border-radius: 0 3px 3px 3px;
+}

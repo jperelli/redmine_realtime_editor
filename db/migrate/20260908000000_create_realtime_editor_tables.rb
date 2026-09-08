@@ -37,6 +37,9 @@ class CreateRealtimeEditorTables < ActiveRecord::Migration[6.1]
       t.string :client_id, null: false, limit: 64
       t.integer :user_id, null: false
       t.boolean :typing, null: false, default: false
+      # Caret/selection as Yjs relative positions (JSON), so it stays attached
+      # to the right character while the text changes around it.
+      t.string :cursor, limit: 1000
       t.datetime :updated_at, null: false
     end
     add_index :realtime_editor_presences, %i[document_id client_id], unique: true

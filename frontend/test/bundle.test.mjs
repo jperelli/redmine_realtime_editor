@@ -14,7 +14,10 @@ vm.runInContext(source, sandbox);
 const Y = sandbox.RealtimeEditorYjs;
 
 test('exposes exactly the API the client uses', () => {
-  for (const name of ['Doc', 'applyUpdate', 'encodeStateAsUpdate', 'mergeUpdates']) {
+  const api = ['Doc', 'applyUpdate', 'encodeStateAsUpdate', 'mergeUpdates',
+    'createRelativePositionFromTypeIndex', 'createAbsolutePositionFromRelativePosition',
+    'relativePositionToJSON', 'createRelativePositionFromJSON'];
+  for (const name of api) {
     assert.equal(typeof Y[name], 'function', name);
   }
 });
@@ -54,6 +57,24 @@ test('seeding with a deterministic client id is idempotent', () => {
   Y.applyUpdate(doc, seed('saved text'));
   Y.applyUpdate(doc, seed('saved text'));
   assert.equal(doc.getText('text').toString(), 'saved text');
+});
+
+test('a caret sent as a relative position follows its character across edits', () => {
+  const a = new Y.Doc();
+  const b = new Y.Doc();
+  a.getText('text').insert(0, 'hello world');
+  Y.applyUpdate(b, Y.encodeStateAsUpdate(a));
+
+  // B's caret is right before "world"; it travels as JSON through the server.
+  const rel = Y.createRelativePositionFromTypeIndex(b.getText('text'), 6);
+  const wire = JSON.stringify(Y.relativePositionToJSON(rel));
+  assert.ok(wire.length < 200, `cursor JSON is small (${wire.length} bytes)`);
+
+  // Meanwhile A inserted text before the caret.
+  a.getText('text').insert(0, 'oh, ');
+  const abs = Y.createAbsolutePositionFromRelativePosition(Y.createRelativePositionFromJSON(JSON.parse(wire)), a);
+  assert.equal(abs.index, 10);
+  assert.equal(a.getText('text').toString().slice(abs.index), 'world');
 });
 
 test('a snapshot replaces the log it was built from', () => {

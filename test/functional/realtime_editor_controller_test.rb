@@ -71,6 +71,21 @@ class RealtimeEditorControllerTest < ActionController::TestCase
     assert_equal [], sync(epoch: 1, since: 2)['updates']
   end
 
+  def test_cursor_is_relayed_to_the_other_clients_as_is
+    sync
+    cursor = '{"anchor":{"type":null,"tname":"text","item":{"client":1,"clock":3},"assoc":0}}'
+    sync(epoch: 1, since: 0, presence: '1', cursor: cursor)
+
+    b = sync(client_id: 'tab-b')
+    assert_equal [cursor], b['presences'].pluck('cursor')
+
+    sync(epoch: 1, since: 0, presence: '1')
+    assert_equal [nil], sync(client_id: 'tab-b', epoch: 1, since: 0, presence: '1')['presences'].pluck('cursor')
+
+    sync(epoch: 1, since: 0, presence: '1', cursor: 'x' * (RealtimeEditorPresence::MAX_CURSOR_LENGTH + 1))
+    assert_equal [nil], sync(client_id: 'tab-b', epoch: 1, since: 0, presence: '1')['presences'].pluck('cursor')
+  end
+
   def test_second_seed_is_rejected_but_log_is_returned
     sync
     sync(epoch: 1, since: 0, seed: 'QQ==')

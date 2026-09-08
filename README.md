@@ -1,10 +1,11 @@
 # Redmine Realtime Editor [![Test](https://github.com/jperelli/redmine_realtime_editor/actions/workflows/test.yml/badge.svg)](https://github.com/jperelli/redmine_realtime_editor/actions/workflows/test.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-**Google-Docs style co-editing of issue descriptions, comments and wiki pages, with no extra infrastructure.** When two people open the same field, every keystroke shows up in the other browser within a second, both texts converge (Yjs CRDT, no "last write wins"), and a small bar under the textarea shows who else is editing and who is typing. Saving works exactly as before: Redmine's form, permissions, journals and history are untouched.
+**Google-Docs style co-editing of issue descriptions, comments and wiki pages, with no extra infrastructure.** When two people open the same field, every keystroke shows up in the other browser within a second, both texts converge (Yjs CRDT, no "last write wins"), you see the other editors' carets and selections in their own colour with their name, and a small bar under the textarea shows who else is editing and who is typing. Saving works exactly as before: Redmine's form, permissions, journals and history are untouched.
 
 The difference with [redmine_yjs](https://www.redmine.org/plugins/redmine_yjs) is the transport. That plugin needs a separate websocket server (Node/y-websocket) next to Redmine, a port, a reverse proxy rule, TLS, process supervision... This plugin talks to **Redmine itself over plain HTTP polling** (optionally long polling). Install the plugin, restart Redmine, done. It works behind any reverse proxy, on shared hosts, and wherever you cannot open ports or run extra daemons.
 
 - Shared fields: issue description, issue notes (new comment), editing an existing comment, wiki pages (including section editing).
+- Remote carets and selections drawn over the textarea, one colour per user, name label while they move. The textarea stays Redmine's own: toolbar, preview, attachments and drag-and-drop keep working.
 - Presence bar: live/offline state, "Also editing: Alice, Bob", typing indicator.
 - Shared drafts survive a page reload and are discarded a configurable time after everybody leaves.
 - Saving a co-edited description or wiki page does **not** trigger Redmine's "updated by another user" conflict for the other editors; unrelated changes (status, assignee...) still do.
@@ -96,7 +97,7 @@ docker run --rm -v "$PWD":/plugin -w /plugin ruby:3.4 sh -c 'gem install rubocop
 
 - The polling latency is the configured poll period (1 s by default), not the ~50 ms of a websocket. For co-editing text this is barely noticeable.
 - Only `textarea` fields are shared. Redmine's other inputs (subject, status, custom fields) are not.
-- Cursor positions of other editors are not shown, only their presence and typing state.
+- Remote carets are refreshed with each poll, so they move in steps of the poll period rather than continuously.
 - Each poll is a regular Redmine request. With N editors on a field that is N requests per second at the default settings; the requests are small and touch only the plugin tables.
 
 ## License

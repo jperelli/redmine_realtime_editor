@@ -100,13 +100,14 @@ class RealtimeEditorDocument < ActiveRecord::Base
 
   # Upserts the presence row of one browser tab. Also keeps the document alive
   # (updated_at) while somebody has it open.
-  def touch_presence!(client_id, user_id, typing:)
+  def touch_presence!(client_id, user_id, typing:, cursor: nil)
     now = Time.current
-    updated = presences.where(client_id: client_id).update_all(user_id: user_id, typing: typing, updated_at: now)
-    presences.create!(client_id: client_id, user_id: user_id, typing: typing, updated_at: now) if updated.zero?
+    attrs = { user_id: user_id, typing: typing, cursor: cursor, updated_at: now }
+    updated = presences.where(client_id: client_id).update_all(attrs)
+    presences.create!(attrs.merge(client_id: client_id)) if updated.zero?
     self.class.where(id: id).update_all(updated_at: now)
   rescue ActiveRecord::RecordNotUnique
-    presences.where(client_id: client_id).update_all(user_id: user_id, typing: typing, updated_at: now)
+    presences.where(client_id: client_id).update_all(attrs)
   end
 
   def active_presences

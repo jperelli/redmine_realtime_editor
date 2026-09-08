@@ -94,6 +94,129 @@
     return node;
   }
 
+  // ------------------------------------------------------------ remote carets
+
+  var CARET_COLORS = ['#d7263d', '#3a5fcd', '#e07a10', '#1b998b', '#8e44ad', '#c2185b', '#5d6d00', '#0b7a75'];
+  // The name label is shown while the caret moves and fades out afterwards.
+  var CARET_LABEL_MS = 4000;
+
+  function colorFor(userId) {
+    return CARET_COLORS[Math.abs(userId) % CARET_COLORS.length];
+  }
+
+  function translucent(hex) {
+    return 'rgba(' + parseInt(hex.slice(1, 3), 16) + ',' + parseInt(hex.slice(3, 5), 16) + ',' +
+      parseInt(hex.slice(5, 7), 16) + ',0.28)';
+  }
+
+  // Typography the mirror must copy from the textarea so both wrap identically.
+  var MIRROR_STYLES = ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'fontVariant', 'lineHeight',
+    'letterSpacing', 'wordSpacing', 'textTransform', 'textIndent', 'tabSize', 'direction',
+    'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft'];
+
+  // A transparent copy of the textarea's text laid over it (pointer-events:
+  // none) in which the other editors' carets and selections are drawn. A plain
+  // textarea cannot host markup, and replacing it with a code editor would
+  // break Redmine's toolbar and preview.
+  function CaretOverlay(textarea) {
+    var self = this;
+    this.textarea = textarea;
+    this.layer = el('div', 'realtime-editor-carets');
+    this.layer.setAttribute('aria-hidden', 'true');
+    var parent = textarea.parentNode;
+    if (getComputedStyle(parent).position === 'static') parent.style.position = 'relative';
+    textarea.insertAdjacentElement('afterend', this.layer);
+    this.onScroll = function () { self.syncScroll(); };
+    textarea.addEventListener('scroll', this.onScroll);
+    if (window.ResizeObserver) {
+      this.observer = new ResizeObserver(function () { self.fit(); });
+      this.observer.observe(textarea);
+    }
+  }
+
+  CaretOverlay.prototype.syncScroll = function () {
+    this.layer.scrollTop = this.textarea.scrollTop;
+    this.layer.scrollLeft = this.textarea.scrollLeft;
+  };
+
+  CaretOverlay.prototype.fit = function () {
+    var ta = this.textarea;
+    var cs = getComputedStyle(ta);
+    var st = this.layer.style;
+    for (var i = 0; i < MIRROR_STYLES.length; i++) st[MIRROR_STYLES[i]] = cs[MIRROR_STYLES[i]];
+    st.left = (ta.offsetLeft + ta.clientLeft) + 'px';
+    st.top = (ta.offsetTop + ta.clientTop) + 'px';
+    st.width = ta.clientWidth + 'px';
+    st.height = ta.clientHeight + 'px';
+    this.syncScroll();
+  };
+
+  // carets: [{from, to, head, color, name, quiet}] with from <= to, indexes into text.
+  CaretOverlay.prototype.render = function (text, carets) {
+    var layer = this.layer;
+    layer.textContent = '';
+    if (!carets.length || !isVisible(this.textarea)) {
+      layer.style.display = 'none';
+      return;
+    }
+    layer.style.display = '';
+    this.fit();
+
+    var points = [0, text.length];
+    var i;
+    for (i = 0; i < carets.length; i++) points.push(carets[i].from, carets[i].to, carets[i].head);
+    points = points.map(function (p) { return Math.max(0, Math.min(text.length, p)); })
+      .sort(function (a, b) { return a - b; })
+      .filter(function (p, idx, arr) { return idx === 0 || p !== arr[idx - 1]; });
+
+    var markers = [];
+    for (i = 0; i < points.length; i++) {
+      var at = points[i];
+      for (var c = 0; c < carets.length; c++) {
+        if (carets[c].head === at) markers.push(this.caretMarker(carets[c]));
+      }
+      if (i === points.length - 1) break;
+      var next = points[i + 1];
+      var chunk = document.createTextNode(text.slice(at, next));
+      var owner = null;
+      for (c = 0; c < carets.length && !owner; c++) {
+        if (carets[c].from <= at && carets[c].to >= next && carets[c].from !== carets[c].to) owner = carets[c];
+      }
+      if (owner) {
+        var sel = el('span', 'realtime-editor-selection');
+        sel.style.backgroundColor = translucent(owner.color);
+        sel.appendChild(chunk);
+        layer.appendChild(sel);
+      } else {
+        layer.appendChild(chunk);
+      }
+    }
+    // A trailing newline would otherwise collapse.
+    layer.appendChild(document.createTextNode('\u200b'));
+
+    // Labels sit above the caret except on the first line, where they would be clipped.
+    for (i = 0; i < markers.length; i++) {
+      if (markers[i].offsetTop < markers[i].offsetHeight) markers[i].classList.add('realtime-editor-caret-below');
+    }
+    this.syncScroll();
+  };
+
+  CaretOverlay.prototype.caretMarker = function (caret) {
+    var marker = el('span', 'realtime-editor-caret' + (caret.quiet ? ' realtime-editor-caret-quiet' : ''));
+    marker.style.borderColor = caret.color;
+    var label = el('span', 'realtime-editor-caret-name', caret.name);
+    label.style.backgroundColor = caret.color;
+    marker.appendChild(label);
+    this.layer.appendChild(marker);
+    return marker;
+  };
+
+  CaretOverlay.prototype.destroy = function () {
+    this.textarea.removeEventListener('scroll', this.onScroll);
+    if (this.observer) this.observer.disconnect();
+    if (this.layer.parentNode) this.layer.parentNode.removeChild(this.layer);
+  };
+
   // ------------------------------------------------------------ document keys
 
   function formOf(textarea) {
@@ -136,6 +259,10 @@
 
   var TYPING_MS = 2500;
   var SEND_DEBOUNCE_MS = 150;
+  var CURSOR_DEBOUNCE_MS = 300;
+  // Keep showing our caret to others this long after the textarea loses focus
+  // (toolbar buttons, preview tab) before it disappears.
+  var CURSOR_LINGER_MS = 15000;
 
   function Session(textarea, info) {
     this.textarea = textarea;
@@ -149,7 +276,10 @@
     this.seedUpdate = null;
     this.compactRequested = false;
     this.others = [];
+    this.remoteCarets = [];
     this.lastInputAt = 0;
+    this.blurredAt = 0;
+    this.lastCursorSent = null;
     this.errors = 0;
     this.timer = null;
     this.inflight = null;
@@ -158,12 +288,27 @@
     this.ytext = null;
 
     this.buildStatusBar();
+    this.overlay = new CaretOverlay(textarea);
     this.markForm();
 
     var self = this;
-    this.onInput = function () { self.lastInputAt = Date.now(); self.pushLocalChanges(); self.schedule(SEND_DEBOUNCE_MS); };
+    this.onInput = function () {
+      self.lastInputAt = Date.now();
+      self.pushLocalChanges();
+      self.renderCarets();
+      self.schedule(SEND_DEBOUNCE_MS);
+    };
     textarea.addEventListener('input', this.onInput);
     textarea.addEventListener('change', this.onInput);
+    this.onSelect = function () {
+      if (self.others.length && self.localCursor() !== self.lastCursorSent) self.schedule(CURSOR_DEBOUNCE_MS);
+    };
+    textarea.addEventListener('keyup', this.onSelect);
+    textarea.addEventListener('mouseup', this.onSelect);
+    textarea.addEventListener('focus', this.onSelect);
+    document.addEventListener('selectionchange', this.onSelect);
+    this.onBlur = function () { self.blurredAt = Date.now(); };
+    textarea.addEventListener('blur', this.onBlur);
     this.onVisibility = function () { if (document.visibilityState === 'visible') self.schedule(0); };
     document.addEventListener('visibilitychange', this.onVisibility);
     this.onPageHide = function () { self.flush(); self.leave(); };
@@ -289,6 +434,84 @@
       ta.setSelectionRange(transformIndex(delta, start), transformIndex(delta, end));
     }
     ta.scrollTop = scroll;
+    this.renderCarets();
+  };
+
+  // --- carets
+
+  // Our caret/selection as JSON of Yjs relative positions ({h: head, a: anchor}),
+  // or null when it should not be shown to the others.
+  Session.prototype.localCursor = function () {
+    var ta = this.textarea;
+    if (!this.ytext) return null;
+    var focused = document.activeElement === ta;
+    if (!focused && Date.now() - this.blurredAt > CURSOR_LINGER_MS) return null;
+    var backward = ta.selectionDirection === 'backward';
+    var head = backward ? ta.selectionStart : ta.selectionEnd;
+    var anchor = backward ? ta.selectionEnd : ta.selectionStart;
+    var cursor = { h: Y.relativePositionToJSON(Y.createRelativePositionFromTypeIndex(this.ytext, head)) };
+    if (anchor !== head) cursor.a = Y.relativePositionToJSON(Y.createRelativePositionFromTypeIndex(this.ytext, anchor));
+    return JSON.stringify(cursor);
+  };
+
+  Session.prototype.rememberRemoteCarets = function () {
+    var carets = [];
+    var previous = {};
+    var now = Date.now();
+    var i;
+    for (i = 0; i < this.remoteCarets.length; i++) previous[this.remoteCarets[i].clientId] = this.remoteCarets[i];
+    for (i = 0; i < this.others.length; i++) {
+      var p = this.others[i];
+      if (!p.cursor) continue;
+      try {
+        var cursor = JSON.parse(p.cursor);
+        var old = previous[p.client_id];
+        carets.push({
+          clientId: p.client_id,
+          raw: p.cursor,
+          movedAt: old && old.raw === p.cursor ? old.movedAt : now,
+          name: p.name,
+          color: colorFor(p.user_id),
+          head: Y.createRelativePositionFromJSON(cursor.h),
+          anchor: cursor.a ? Y.createRelativePositionFromJSON(cursor.a) : null
+        });
+      } catch (e) {
+        // Malformed cursor from another client: just don't draw it.
+      }
+    }
+    this.remoteCarets = carets;
+    this.renderCarets();
+  };
+
+  // Resolves the remote carets against the current text and draws them.
+  Session.prototype.renderCarets = function () {
+    var self = this;
+    if (!this.doc || !this.overlay) return;
+    var carets = [];
+    var now = Date.now();
+    var nextFade = Infinity;
+    for (var i = 0; i < this.remoteCarets.length; i++) {
+      var c = this.remoteCarets[i];
+      var head = Y.createAbsolutePositionFromRelativePosition(c.head, this.doc);
+      if (!head || head.type !== this.ytext) continue;
+      var anchor = c.anchor ? Y.createAbsolutePositionFromRelativePosition(c.anchor, this.doc) : null;
+      var other = anchor && anchor.type === this.ytext ? anchor.index : head.index;
+      var fadeAt = c.movedAt + CARET_LABEL_MS;
+      if (fadeAt > now) nextFade = Math.min(nextFade, fadeAt);
+      carets.push({
+        name: c.name,
+        color: c.color,
+        quiet: fadeAt <= now,
+        head: head.index,
+        from: Math.min(head.index, other),
+        to: Math.max(head.index, other)
+      });
+    }
+    this.overlay.render(this.textarea.value, carets);
+    clearTimeout(this.caretTimer);
+    if (nextFade < Infinity) {
+      this.caretTimer = setTimeout(function () { self.renderCarets(); }, nextFade - now + 50);
+    }
   };
 
   Session.prototype.setTextareaValue = function (value) {
@@ -320,11 +543,16 @@
     if (this.stopped) return;
     if (this.inflight) {
       // A long poll is waiting on the server; interrupt it to send right away.
-      if (this.inflight.waiting && ms <= SEND_DEBOUNCE_MS) this.inflight.abort();
+      if (this.inflight.waiting && ms <= CURSOR_DEBOUNCE_MS) this.inflight.abort();
       return;
     }
+    // Only ever bring the next poll forward, so a stream of events cannot
+    // postpone it forever.
+    var due = Date.now() + ms;
+    if (this.timer && this.timerDue <= due) return;
     clearTimeout(this.timer);
-    this.timer = setTimeout(function () { self.sync(); }, ms);
+    this.timerDue = due;
+    this.timer = setTimeout(function () { self.timer = null; self.sync(); }, ms);
   };
 
   Session.prototype.nextDelay = function () {
@@ -345,6 +573,9 @@
     body.set('since', String(this.since));
     body.set('presence', '1');
     body.set('typing', Date.now() - this.lastInputAt < TYPING_MS ? '1' : '0');
+    var cursor = this.localCursor();
+    if (cursor) body.set('cursor', cursor);
+    this.lastCursorSent = cursor;
     if (this.epoch !== null) body.set('epoch', String(this.epoch));
 
     var sent = this.pending;
@@ -409,6 +640,7 @@
     if (json.compact_suggested && Math.random() < 0.5) this.compactRequested = true;
     this.others = (json.presences || []).filter(function (p) { return p.user_id !== config.userId; });
     this.renderPeers();
+    this.rememberRemoteCarets();
     this.bumpVersion(json.synced_from_version, json.synced_version);
   };
 
@@ -512,10 +744,17 @@
     if (this.stopped) return;
     this.stopped = true;
     clearTimeout(this.timer);
+    clearTimeout(this.caretTimer);
     if (this.inflight) this.inflight.abort();
     if (reason !== 'forbidden') { this.flush(); this.leave(); }
     this.textarea.removeEventListener('input', this.onInput);
     this.textarea.removeEventListener('change', this.onInput);
+    this.textarea.removeEventListener('keyup', this.onSelect);
+    this.textarea.removeEventListener('mouseup', this.onSelect);
+    this.textarea.removeEventListener('focus', this.onSelect);
+    this.textarea.removeEventListener('blur', this.onBlur);
+    document.removeEventListener('selectionchange', this.onSelect);
+    this.overlay.destroy();
     document.removeEventListener('visibilitychange', this.onVisibility);
     window.removeEventListener('pagehide', this.onPageHide);
     var form = formOf(this.textarea);

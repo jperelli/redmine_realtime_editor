@@ -15,6 +15,7 @@ class RealtimeEditorController < ApplicationController
   #   seed       base64 initial state, stored only if the log is empty (optional)
   #   snapshot   base64 merged state replacing the log up to snapshot_upto (optional)
   #   typing     "1" while the user is typing (presence)
+  #   cursor     caret/selection as JSON of Yjs relative positions (presence, optional)
   #   presence   "1" to (re)write the presence row
   #   wait       "1" to hold the request until something changes (long polling)
   def sync
@@ -32,7 +33,9 @@ class RealtimeEditorController < ApplicationController
     if params[:snapshot].present? && !epoch_changed
       payload['compacted'] = doc.compact!(params[:snapshot], params[:snapshot_upto].to_i, User.current.id)
     end
-    doc.touch_presence!(client_id, User.current.id, typing: params[:typing].to_s == '1') if presence_wanted?
+    if presence_wanted?
+      doc.touch_presence!(client_id, User.current.id, typing: params[:typing].to_s == '1', cursor: cursor_param)
+    end
 
     updates = wait_for_updates(doc, since)
     payload['updates'] = updates.map(&:as_json)
@@ -65,6 +68,13 @@ class RealtimeEditorController < ApplicationController
 
   def client_id
     params[:client_id].to_s[0, 64]
+  end
+
+  def cursor_param
+    cursor = params[:cursor].to_s
+    return nil if cursor.empty? || cursor.length > RealtimeEditorPresence::MAX_CURSOR_LENGTH
+
+    cursor
   end
 
   def check_payload_size

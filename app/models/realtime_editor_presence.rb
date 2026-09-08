@@ -2,6 +2,7 @@
 # polls and considered gone after TIMEOUT without news.
 class RealtimeEditorPresence < ActiveRecord::Base
   TIMEOUT = 45.seconds
+  MAX_CURSOR_LENGTH = 1000
 
   belongs_to :document, class_name: 'RealtimeEditorDocument', inverse_of: :presences
   belongs_to :user
@@ -12,6 +13,7 @@ class RealtimeEditorPresence < ActiveRecord::Base
       'user_id' => user_id,
       'name' => user&.name.to_s,
       'typing' => typing,
+      'cursor' => cursor,
       'updated_at' => updated_at.to_i
     }
   end
