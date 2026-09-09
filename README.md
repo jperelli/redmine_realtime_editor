@@ -105,7 +105,7 @@ docker run --rm -v "$PWD":/plugin -w /plugin ruby:3.4 sh -c 'gem install rubocop
 ## Limitations
 
 - The polling latency is the configured poll period (1 s by default), not the ~50 ms of a websocket. For co-editing text this is barely noticeable.
-- Only `textarea` fields are shared. Redmine's other inputs (subject, status, custom fields) are not.
+- Shared fields are those of the issue edit form and the wiki editor. The new-issue form, bulk edit, the context menu and the API are not collaborative (changes made there still trigger Redmine's normal conflict check for the other editors).
 - Remote carets are refreshed with each poll, so they move in steps of the poll period rather than continuously.
 - Each poll is a regular Redmine request. With N editors on a field that is N requests per second at the default settings; the requests are small and touch only the plugin tables.
 
