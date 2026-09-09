@@ -1,5 +1,9 @@
 # Redmine Realtime Editor [![Test](https://github.com/jperelli/redmine_realtime_editor/actions/workflows/test.yml/badge.svg)](https://github.com/jperelli/redmine_realtime_editor/actions/workflows/test.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
+[![Demo: admin (left) and Alice (right) co-editing the same issue](doc/demo.gif)](doc/demo.mp4)
+
+*Two users on the same issue: the description is typed in one browser and appears in the other with the author's caret, fields flip with a "changed by" mark (including through Redmine's own form refresh on status change), and both submit without a conflict. Click the image for the video.*
+
 **Google-Docs style co-editing of issues, comments and wiki pages, with no extra infrastructure.** When two people open the same issue form, every keystroke in the description shows up in the other browser within a second, both texts converge (Yjs CRDT, no "last write wins"), you see the other editors' carets and selections in their own colour with their name, and a small bar under the textarea shows who else is editing and who is typing. Every other field of the form (status, assignee, dates, custom fields...) follows too: change the priority and the other editors' selects flip with a "changed by Alice" mark. Saving works exactly as before: Redmine's form, permissions, journals and history are untouched.
 
 The difference with [redmine_yjs](https://www.redmine.org/plugins/redmine_yjs) is the transport. That plugin needs a separate websocket server (Node/y-websocket) next to Redmine, a port, a reverse proxy rule, TLS, process supervision... This plugin talks to **Redmine itself over plain HTTP polling** (optionally long polling). Install the plugin, restart Redmine, done. It works behind any reverse proxy, on shared hosts, and wherever you cannot open ports or run extra daemons.

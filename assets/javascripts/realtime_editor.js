@@ -928,6 +928,7 @@
     var self = this;
     this.onChange = function (e) {
       var control = e.target;
+      self.descriptionOpen = descriptionToolbarOpen(self.form);
       if (self.applying || !control || !sharedField(control)) return;
       self.dirty[control.name] = true;
       if (self.changed[control.name]) { delete self.changed[control.name]; self.renderChanged(control.name); }
@@ -1050,7 +1051,22 @@
     this.map.forEach(function (entry, name) { self.applyEntry(name, false); });
     Object.keys(this.changed).forEach(function (name) { self.renderChanged(name); });
     if (!this.marker.parentNode) this.form.appendChild(this.marker);
+    // The re-rendered form hides the description behind its "Edit" link again.
+    if (this.descriptionOpen) openDescriptionToolbar(this.form);
   };
+
+  function descriptionToolbarOpen(form) {
+    var wrap = form.querySelector('#issue_description_and_toolbar');
+    return !!wrap && isVisible(wrap);
+  }
+
+  function openDescriptionToolbar(form) {
+    var wrap = form.querySelector('#issue_description_and_toolbar');
+    if (!wrap || isVisible(wrap)) return;
+    wrap.style.display = '';
+    var link = wrap.parentNode.querySelector('a.icon-edit, a[onclick*="issue_description_and_toolbar"]');
+    if (link) link.style.display = 'none';
+  }
 
   // --- "changed by" highlight
 
