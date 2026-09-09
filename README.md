@@ -1,3 +1,5 @@
+<p align="center"><img src="doc/logo.png" alt="Redmine Realtime Editor logo" width="128"></p>
+
 # Redmine Realtime Editor [![Test](https://github.com/jperelli/redmine_realtime_editor/actions/workflows/test.yml/badge.svg)](https://github.com/jperelli/redmine_realtime_editor/actions/workflows/test.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 [![Demo: admin (left) and Alice (right) co-editing the same issue](doc/demo.gif)](doc/demo.mp4)
