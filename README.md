@@ -42,6 +42,8 @@ bundle exec rake redmine:plugins:migrate RAILS_ENV=production
 
 Restart Redmine. Open an issue in two browsers, click *Edit* in both and start typing.
 
+Listed in the [Redmine plugin directory](https://www.redmine.org/plugins/redmine_realtime_editor); announcement and discussion in the [Plugins forum](https://www.redmine.org/boards/3/topics/72252).
+
 The Yjs bundle is committed (`assets/javascripts/realtime_editor_yjs.js`), so **no Node.js is needed** to install or run the plugin. Node is only required if you want to rebuild it (see below).
 
 ### Uninstall
