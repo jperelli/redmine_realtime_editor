@@ -11,7 +11,7 @@ Redmine::Plugin.register :redmine_realtime_editor do
   author 'Julian Perelli'
   description 'Collaborative real-time editing of issue descriptions, notes and wiki pages ' \
               'over plain HTTP polling: no websocket server or extra infrastructure needed'
-  version '0.1.0'
+  version '0.2.0'
   url 'https://github.com/jperelli/redmine_realtime_editor/'
   author_url 'https://jperelli.com.ar/'
 

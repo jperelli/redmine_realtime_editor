@@ -99,7 +99,8 @@
   white-space: nowrap;
 }
 
-textarea.realtime-editor-posted {
+textarea.realtime-editor-posted,
+.monaco-editor-wrapper.realtime-editor-posted {
   opacity: 0.55;
 }
 
@@ -154,6 +155,50 @@ textarea.realtime-editor-posted {
 }
 
 .realtime-editor-caret-below .realtime-editor-caret-name {
+  bottom: auto;
+  top: 100%;
+  border-radius: 0 3px 3px 3px;
+}
+
+/* Remote carets inside a Monaco editor (redmine_monaco_editor plugin):
+   decorations whose colour and label are set per caret by the script. */
+.realtime-editor-mc-selection {
+  border-radius: 2px;
+}
+
+.realtime-editor-mc-caret {
+  position: absolute;
+  box-sizing: border-box;
+  height: 100%;
+  border-left: 2px solid;
+  margin-left: -1px;
+  pointer-events: none;
+}
+
+.realtime-editor-mc-caret::after {
+  position: absolute;
+  left: -2px;
+  bottom: 100%;
+  content: "";
+  padding: 0 4px;
+  border-radius: 3px 3px 3px 0;
+  font-family: var(--fonts-main, "Noto Sans", Verdana, sans-serif);
+  font-size: 10px;
+  font-weight: normal;
+  font-style: normal;
+  line-height: 14px;
+  white-space: nowrap;
+  color: #fff;
+  opacity: 0.92;
+  transition: opacity 0.4s;
+  z-index: 1;
+}
+
+.realtime-editor-mc-quiet::after {
+  opacity: 0;
+}
+
+.realtime-editor-mc-caret-below::after {
   bottom: auto;
   top: 100%;
   border-radius: 0 3px 3px 3px;

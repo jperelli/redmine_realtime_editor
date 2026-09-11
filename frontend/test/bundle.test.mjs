@@ -14,7 +14,7 @@ vm.runInContext(source, sandbox);
 const Y = sandbox.RealtimeEditorYjs;
 
 test('exposes exactly the API the client uses', () => {
-  const api = ['Doc', 'applyUpdate', 'encodeStateAsUpdate', 'mergeUpdates',
+  const api = ['Doc', 'applyUpdate', 'encodeStateAsUpdate', 'mergeUpdates', 'UndoManager',
     'createRelativePositionFromTypeIndex', 'createAbsolutePositionFromRelativePosition',
     'relativePositionToJSON', 'createRelativePositionFromJSON'];
   for (const name of api) {
@@ -86,4 +86,27 @@ test('a snapshot replaces the log it was built from', () => {
   const late = new Y.Doc();
   Y.applyUpdate(late, snapshot);
   assert.equal(late.getText('text').toString(), 'one two');
+});
+
+test('UndoManager undoes local edits only and survives interleaved remote edits', () => {
+  const a = new Y.Doc();
+  const b = new Y.Doc();
+  const relay = (from, to) => from.on('update', (u, origin) => { if (origin !== 'remote') Y.applyUpdate(to, u, 'remote'); });
+  relay(a, b);
+  relay(b, a);
+  const ta = a.getText('text');
+  const undo = new Y.UndoManager(ta, { trackedOrigins: new Set(['local']), captureTimeout: 0 });
+
+  a.transact(() => ta.insert(0, 'hello'), 'local');
+  b.getText('text').insert(0, 'REMOTE ');
+  a.transact(() => ta.insert(ta.length, ' world'), 'local');
+  assert.equal(ta.toString(), 'REMOTE hello world');
+
+  undo.undo();
+  assert.equal(ta.toString(), 'REMOTE hello');
+  undo.undo();
+  assert.equal(ta.toString(), 'REMOTE ');
+  undo.redo();
+  assert.equal(ta.toString(), 'REMOTE hello');
+  assert.equal(b.getText('text').toString(), 'REMOTE hello');
 });

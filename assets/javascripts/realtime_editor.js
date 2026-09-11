@@ -5,6 +5,9 @@
  * plugin controller; the same request returns the updates of the other
  * editors, which are applied to the local document and thus to the textarea.
  * No websocket, no extra server process: the transport is the Redmine app.
+ *
+ * When the Monaco editor plugin replaces a textarea (it hides it and keeps its
+ * value in sync with a Monaco model), the session binds to that model instead.
  */
 (function () {
   'use strict';
@@ -76,6 +79,24 @@
       if (pos > index) break;
     }
     return out;
+  }
+
+  // Index just after the last change of a delta, in the resulting text.
+  function deltaEnd(delta) {
+    var pos = 0;
+    var end = 0;
+    for (var i = 0; i < delta.length; i++) {
+      var op = delta[i];
+      if (op.retain != null) {
+        pos += op.retain;
+      } else if (op.insert != null) {
+        pos += op.insert.length;
+        end = pos;
+      } else if (op.delete != null) {
+        end = pos;
+      }
+    }
+    return end;
   }
 
   function csrfToken() {
@@ -217,6 +238,298 @@
     if (this.layer.parentNode) this.layer.parentNode.removeChild(this.layer);
   };
 
+  // ----------------------------------------------------------------- editors
+  //
+  // The session reads and writes the text through one of these adapters:
+  // {kind, root(), getValue(), setValue(v), applyDelta(delta), selection(),
+  // bind(handlers), renderCarets(text, carets), disable(), destroy()}.
+
+  function TextareaEditor(textarea, carets) {
+    this.kind = 'textarea';
+    this.textarea = textarea;
+    this.overlay = carets ? new CaretOverlay(textarea) : null;
+  }
+
+  TextareaEditor.prototype.root = function () { return this.textarea; };
+
+  TextareaEditor.prototype.getValue = function () { return this.textarea.value; };
+
+  TextareaEditor.prototype.setValue = function (value) {
+    if (this.textarea.value === value) return;
+    var scroll = this.textarea.scrollTop;
+    this.textarea.value = value;
+    this.textarea.scrollTop = scroll;
+  };
+
+  TextareaEditor.prototype.applyDelta = function (delta, text) {
+    var ta = this.textarea;
+    var start = ta.selectionStart;
+    var end = ta.selectionEnd;
+    var scroll = ta.scrollTop;
+    var focused = document.activeElement === ta;
+    ta.value = text;
+    if (focused) ta.setSelectionRange(transformIndex(delta, start), transformIndex(delta, end));
+    ta.scrollTop = scroll;
+  };
+
+  TextareaEditor.prototype.selection = function () {
+    var ta = this.textarea;
+    var backward = ta.selectionDirection === 'backward';
+    return {
+      focused: document.activeElement === ta,
+      head: backward ? ta.selectionStart : ta.selectionEnd,
+      anchor: backward ? ta.selectionEnd : ta.selectionStart
+    };
+  };
+
+  TextareaEditor.prototype.bind = function (handlers) {
+    var ta = this.textarea;
+    this.handlers = handlers;
+    this.onInput = function () { handlers.input(null); };
+    ta.addEventListener('input', this.onInput);
+    ta.addEventListener('change', this.onInput);
+    ta.addEventListener('keyup', handlers.select);
+    ta.addEventListener('mouseup', handlers.select);
+    ta.addEventListener('focus', handlers.select);
+    document.addEventListener('selectionchange', handlers.select);
+    ta.addEventListener('blur', handlers.blur);
+  };
+
+  TextareaEditor.prototype.renderCarets = function (text, carets) {
+    if (this.overlay) this.overlay.render(text, carets);
+  };
+
+  TextareaEditor.prototype.disable = function () {
+    this.textarea.disabled = true;
+    this.textarea.classList.add('realtime-editor-posted');
+  };
+
+  TextareaEditor.prototype.destroy = function () {
+    var ta = this.textarea;
+    var h = this.handlers;
+    if (h) {
+      ta.removeEventListener('input', this.onInput);
+      ta.removeEventListener('change', this.onInput);
+      ta.removeEventListener('keyup', h.select);
+      ta.removeEventListener('mouseup', h.select);
+      ta.removeEventListener('focus', h.select);
+      document.removeEventListener('selectionchange', h.select);
+      ta.removeEventListener('blur', h.blur);
+    }
+    if (this.overlay) this.overlay.destroy();
+  };
+
+  // The redmine_monaco_editor plugin inserts its wrapper right before the
+  // textarea, marks the textarea .monaco-replaced and hides it.
+  function monacoWrapperOf(textarea) {
+    if (!textarea.classList.contains('monaco-replaced')) return null;
+    for (var node = textarea.previousElementSibling; node; node = node.previousElementSibling) {
+      if (node.classList.contains('monaco-editor-wrapper')) return node;
+    }
+    return null;
+  }
+
+  function monacoEditorOf(textarea) {
+    var monaco = window.monaco;
+    var wrapper = monacoWrapperOf(textarea);
+    if (!wrapper || !monaco || !monaco.editor || !monaco.editor.getEditors) return null;
+    var editors = monaco.editor.getEditors();
+    for (var i = 0; i < editors.length; i++) {
+      var node = editors[i].getContainerDomNode();
+      if (node && node.classList.contains('monaco-editor-container') && wrapper.contains(node) &&
+          editors[i].getModel()) {
+        return editors[i];
+      }
+    }
+    return null;
+  }
+
+  var monacoStyleSeq = 0;
+
+  function MonacoEditor(textarea, editor, carets) {
+    this.kind = 'monaco';
+    this.textarea = textarea;
+    this.editor = editor;
+    this.monaco = window.monaco;
+    this.applying = false;
+    this.disposables = [];
+    this.undoModel = null;
+    // Yjs indexes count \n line breaks, like the textarea.
+    editor.getModel().setEOL(this.monaco.editor.EndOfLineSequence.LF);
+    if (carets) {
+      this.decorations = editor.createDecorationsCollection();
+      this.prefix = 'realtime-editor-mc-' + (++monacoStyleSeq) + '-';
+      this.style = document.createElement('style');
+      document.head.appendChild(this.style);
+    }
+  }
+
+  MonacoEditor.prototype.root = function () {
+    return monacoWrapperOf(this.textarea) || this.textarea;
+  };
+
+  MonacoEditor.prototype.getValue = function () {
+    return this.editor.getModel().getValue();
+  };
+
+  MonacoEditor.prototype.rangeAt = function (from, to) {
+    var model = this.editor.getModel();
+    return this.monaco.Range.fromPositions(model.getPositionAt(from), model.getPositionAt(to));
+  };
+
+  MonacoEditor.prototype.edit = function (edits) {
+    this.applying = true;
+    try {
+      this.editor.getModel().applyEdits(edits);
+    } finally {
+      this.applying = false;
+    }
+  };
+
+  MonacoEditor.prototype.setValue = function (value) {
+    var current = this.getValue();
+    if (current === value) return;
+    var d = diffStrings(current, value);
+    this.edit([{ range: this.rangeAt(d.index, d.index + d.remove), text: d.insert }]);
+  };
+
+  // Replays a Y.Text delta as model edits so Monaco keeps its own state
+  // (folding, decorations, view) instead of a full setValue.
+  MonacoEditor.prototype.applyDelta = function (delta) {
+    var editor = this.editor;
+    var sel = editor.getSelection();
+    var model = editor.getModel();
+    var anchor = sel ? model.getOffsetAt(sel.getSelectionStart()) : 0;
+    var head = sel ? model.getOffsetAt(sel.getPosition()) : 0;
+    var index = 0;
+    for (var i = 0; i < delta.length; i++) {
+      var op = delta[i];
+      if (op.retain != null) {
+        index += op.retain;
+      } else if (op.insert != null) {
+        this.edit([{ range: this.rangeAt(index, index), text: op.insert, forceMoveMarkers: true }]);
+        index += op.insert.length;
+      } else if (op.delete != null) {
+        this.edit([{ range: this.rangeAt(index, index + op.delete), text: '' }]);
+      }
+    }
+    if (sel && editor.hasTextFocus()) {
+      var a = model.getPositionAt(transformIndex(delta, anchor));
+      var h = model.getPositionAt(transformIndex(delta, head));
+      editor.setSelection(new this.monaco.Selection(a.lineNumber, a.column, h.lineNumber, h.column));
+    }
+  };
+
+  MonacoEditor.prototype.setCaret = function (index) {
+    var pos = this.editor.getModel().getPositionAt(index);
+    this.editor.setPosition(pos);
+    this.editor.revealPositionInCenterIfOutsideViewport(pos);
+  };
+
+  // Monaco's own undo stack stores text offsets, which remote edits (applied
+  // with applyEdits) invalidate. Every undo path — keybinding, context menu,
+  // command palette, editor.trigger — ends in model.undo()/redo(), so those
+  // are overridden on the bound model to drive the session's Y.UndoManager.
+  MonacoEditor.prototype.bindUndo = function (hooks) {
+    var model = this.editor.getModel();
+    this.undoModel = model;
+    model.undo = function () { hooks.undo(); };
+    model.redo = function () { hooks.redo(); };
+  };
+
+  MonacoEditor.prototype.selection = function () {
+    var sel = this.editor.getSelection();
+    var model = this.editor.getModel();
+    return {
+      focused: this.editor.hasTextFocus(),
+      head: sel ? model.getOffsetAt(sel.getPosition()) : 0,
+      anchor: sel ? model.getOffsetAt(sel.getSelectionStart()) : 0
+    };
+  };
+
+  MonacoEditor.prototype.bind = function (handlers) {
+    var self = this;
+    this.disposables.push(this.editor.onDidChangeModelContent(function (e) {
+      if (self.applying) return;
+      // A setValue (isFlush) has no usable change list: the caller diffs.
+      if (e.isFlush) { handlers.input(null); return; }
+      var changes = e.changes.slice().sort(function (c1, c2) { return c2.rangeOffset - c1.rangeOffset; });
+      handlers.input(changes.map(function (c) {
+        return { index: c.rangeOffset, remove: c.rangeLength, insert: c.text };
+      }));
+    }));
+    this.disposables.push(this.editor.onDidChangeCursorSelection(handlers.select));
+    this.disposables.push(this.editor.onDidFocusEditorText(handlers.select));
+    this.disposables.push(this.editor.onDidBlurEditorText(handlers.blur));
+  };
+
+  // Remote carets and selections become Monaco decorations; colours and the
+  // name labels (::after content) come from a per-editor stylesheet.
+  MonacoEditor.prototype.renderCarets = function (text, carets) {
+    if (!this.decorations) return;
+    var model = this.editor.getModel();
+    var decorations = [];
+    var css = '';
+    var length = model.getValueLength();
+    for (var i = 0; i < carets.length; i++) {
+      var c = carets[i];
+      var id = this.prefix + i;
+      var from = Math.min(c.from, length);
+      var to = Math.min(c.to, length);
+      var head = model.getPositionAt(Math.min(c.head, length));
+      if (from !== to) {
+        decorations.push({
+          range: this.rangeAt(from, to),
+          options: { className: 'realtime-editor-mc-selection ' + id + '-sel' }
+        });
+        css += '.' + id + '-sel{background-color:' + translucent(c.color) + '}';
+      }
+      var classes = 'realtime-editor-mc-caret ' + id + '-head';
+      if (c.quiet) classes += ' realtime-editor-mc-quiet';
+      if (head.lineNumber === 1) classes += ' realtime-editor-mc-caret-below';
+      decorations.push({
+        range: this.monaco.Range.fromPositions(head, head),
+        options: { beforeContentClassName: classes, stickiness: 1 }
+      });
+      css += '.' + id + '-head{border-color:' + c.color + '}' +
+        '.' + id + '-head::after{content:' + JSON.stringify(c.name) + ';background-color:' + c.color + '}';
+    }
+    this.style.textContent = css;
+    this.decorations.set(decorations);
+  };
+
+  MonacoEditor.prototype.disable = function () {
+    this.textarea.disabled = true;
+    this.editor.updateOptions({ readOnly: true });
+    this.root().classList.add('realtime-editor-posted');
+  };
+
+  MonacoEditor.prototype.destroy = function () {
+    for (var i = 0; i < this.disposables.length; i++) this.disposables[i].dispose();
+    this.disposables = [];
+    if (this.undoModel) {
+      delete this.undoModel.undo;
+      delete this.undoModel.redo;
+      this.undoModel = null;
+    }
+    if (this.decorations) this.decorations.clear();
+    if (this.style && this.style.parentNode) this.style.parentNode.removeChild(this.style);
+  };
+
+  function editorKindOf(textarea) {
+    return monacoEditorOf(textarea) ? 'monaco' : 'textarea';
+  }
+
+  function makeEditor(textarea, carets) {
+    var monaco = monacoEditorOf(textarea);
+    return monaco ? new MonacoEditor(textarea, monaco, carets) : new TextareaEditor(textarea, carets);
+  }
+
+  // The element whose visibility decides whether the textarea is being edited.
+  function editorRootOf(textarea) {
+    return monacoWrapperOf(textarea) || textarea;
+  }
+
   // ------------------------------------------------------------ document keys
 
   function formOf(textarea) {
@@ -300,29 +613,27 @@
     this.stopped = false;
     this.doc = null;
     this.ytext = null;
+    this.undoManager = null;
 
+    this.editor = makeEditor(textarea, !this.presenceOnly);
+    this.editorKind = this.editor.kind;
     this.buildStatusBar();
-    this.overlay = this.presenceOnly ? null : new CaretOverlay(textarea);
     if (!this.presenceOnly) this.markForm();
 
     var self = this;
-    this.onInput = function () {
-      self.lastInputAt = Date.now();
-      self.pushLocalChanges();
-      self.renderCarets();
-      self.schedule(SEND_DEBOUNCE_MS);
-    };
-    textarea.addEventListener('input', this.onInput);
-    textarea.addEventListener('change', this.onInput);
-    this.onSelect = function () {
-      if (self.others.length && self.localCursor() !== self.lastCursorSent) self.schedule(CURSOR_DEBOUNCE_MS);
-    };
-    textarea.addEventListener('keyup', this.onSelect);
-    textarea.addEventListener('mouseup', this.onSelect);
-    textarea.addEventListener('focus', this.onSelect);
-    document.addEventListener('selectionchange', this.onSelect);
-    this.onBlur = function () { self.blurredAt = Date.now(); };
-    textarea.addEventListener('blur', this.onBlur);
+    this.editor.bind({
+      input: function (changes) {
+        self.lastInputAt = Date.now();
+        if (changes) self.applyLocalChanges(changes);
+        self.pushLocalChanges();
+        self.renderCarets();
+        self.schedule(SEND_DEBOUNCE_MS);
+      },
+      select: function () {
+        if (self.others.length && self.localCursor() !== self.lastCursorSent) self.schedule(CURSOR_DEBOUNCE_MS);
+      },
+      blur: function () { self.blurredAt = Date.now(); }
+    });
     this.onVisibility = function () { if (document.visibilityState === 'visible') self.schedule(0); };
     document.addEventListener('visibilitychange', this.onVisibility);
     this.onPageHide = function () { self.flush(); self.leave(); };
@@ -384,7 +695,7 @@
 
   Session.prototype.rebuildDoc = function (savedText, updates, keepLocalText) {
     var self = this;
-    var local = this.textarea.value;
+    var local = this.editor.getValue();
     if (this.doc) this.doc.destroy();
     this.pending = [];
     this.seedUpdate = null;
@@ -393,13 +704,15 @@
     this.savedText = savedText == null ? '' : savedText.replace(/\r\n?/g, '\n');
     this.doc = new Y.Doc();
     this.ytext = this.doc.getText('text');
+    this.undoManager = this.editor.bindUndo ? this.buildUndoManager() : null;
 
     this.doc.on('update', function (update, origin) {
-      if (origin === 'local') self.pending.push(update);
+      if (self.isLocalOrigin(origin)) self.pending.push(update);
     });
     this.ytext.observe(function (event, txn) {
       if (txn.origin === 'local') return;
       self.applyRemoteDelta(event.delta);
+      if (self.undoManager && txn.origin === self.undoManager) self.editor.setCaret(deltaEnd(event.delta));
     });
 
     this.applyRemoteUpdates(updates);
@@ -418,12 +731,29 @@
     var draft = this.ytext.toString();
     if (keepLocalText && local !== this.savedText && draft === this.savedText) {
       // Typed before we connected: keep it.
-      this.setTextareaValue(local);
+      this.editor.setValue(local);
       this.pushLocalChanges();
     } else {
-      this.setTextareaValue(draft);
+      this.editor.setValue(draft);
       if (draft !== this.savedText) this.showNotice(t.draft_loaded);
     }
+    if (this.undoManager) this.undoManager.clear();
+  };
+
+  // Undo/redo of our own edits only, as CRDT operations: a peer's edits are
+  // never reverted and stay where they are, whatever the editor's own stack
+  // would have done with its stale offsets.
+  Session.prototype.buildUndoManager = function () {
+    var manager = new Y.UndoManager(this.ytext, { trackedOrigins: new Set(['local']), captureTimeout: 500 });
+    this.editor.bindUndo({
+      undo: function () { manager.undo(); },
+      redo: function () { manager.redo(); }
+    });
+    return manager;
+  };
+
+  Session.prototype.isLocalOrigin = function (origin) {
+    return origin === 'local' || (this.undoManager !== null && origin === this.undoManager);
   };
 
   Session.prototype.applyRemoteUpdates = function (updates) {
@@ -438,16 +768,7 @@
   };
 
   Session.prototype.applyRemoteDelta = function (delta) {
-    var ta = this.textarea;
-    var start = ta.selectionStart;
-    var end = ta.selectionEnd;
-    var scroll = ta.scrollTop;
-    var focused = document.activeElement === ta;
-    ta.value = this.ytext.toString();
-    if (focused) {
-      ta.setSelectionRange(transformIndex(delta, start), transformIndex(delta, end));
-    }
-    ta.scrollTop = scroll;
+    this.editor.applyDelta(delta, this.ytext.toString());
     this.renderCarets();
   };
 
@@ -456,15 +777,13 @@
   // Our caret/selection as JSON of Yjs relative positions ({h: head, a: anchor}),
   // or null when it should not be shown to the others.
   Session.prototype.localCursor = function () {
-    var ta = this.textarea;
     if (!this.ytext) return null;
-    var focused = document.activeElement === ta;
-    if (!focused && Date.now() - this.blurredAt > CURSOR_LINGER_MS) return null;
-    var backward = ta.selectionDirection === 'backward';
-    var head = backward ? ta.selectionStart : ta.selectionEnd;
-    var anchor = backward ? ta.selectionEnd : ta.selectionStart;
-    var cursor = { h: Y.relativePositionToJSON(Y.createRelativePositionFromTypeIndex(this.ytext, head)) };
-    if (anchor !== head) cursor.a = Y.relativePositionToJSON(Y.createRelativePositionFromTypeIndex(this.ytext, anchor));
+    var sel = this.editor.selection();
+    if (!sel.focused && Date.now() - this.blurredAt > CURSOR_LINGER_MS) return null;
+    var cursor = { h: Y.relativePositionToJSON(Y.createRelativePositionFromTypeIndex(this.ytext, sel.head)) };
+    if (sel.anchor !== sel.head) {
+      cursor.a = Y.relativePositionToJSON(Y.createRelativePositionFromTypeIndex(this.ytext, sel.anchor));
+    }
     return JSON.stringify(cursor);
   };
 
@@ -500,7 +819,7 @@
   // Resolves the remote carets against the current text and draws them.
   Session.prototype.renderCarets = function () {
     var self = this;
-    if (!this.doc || !this.overlay) return;
+    if (!this.doc || this.presenceOnly) return;
     var carets = [];
     var now = Date.now();
     var nextFade = Infinity;
@@ -521,26 +840,33 @@
         to: Math.max(head.index, other)
       });
     }
-    this.overlay.render(this.textarea.value, carets);
+    this.editor.renderCarets(this.editor.getValue(), carets);
     clearTimeout(this.caretTimer);
     if (nextFade < Infinity) {
       this.caretTimer = setTimeout(function () { self.renderCarets(); }, nextFade - now + 50);
     }
   };
 
-  Session.prototype.setTextareaValue = function (value) {
-    if (this.textarea.value === value) return;
-    var scroll = this.textarea.scrollTop;
-    this.textarea.value = value;
-    this.textarea.scrollTop = scroll;
+  // Exact local edits reported by the editor: [{index, remove, insert}] in
+  // descending index order, relative to the text before the edit.
+  Session.prototype.applyLocalChanges = function (changes) {
+    if (!this.doc) return;
+    var ytext = this.ytext;
+    this.doc.transact(function () {
+      for (var i = 0; i < changes.length; i++) {
+        var c = changes[i];
+        if (c.remove) ytext.delete(c.index, c.remove);
+        if (c.insert) ytext.insert(c.index, c.insert);
+      }
+    }, 'local');
   };
 
-  // Pushes whatever differs between the textarea and the shared text as a local
+  // Pushes whatever differs between the editor and the shared text as a local
   // edit. Also catches changes made without an input event (toolbar buttons).
   Session.prototype.pushLocalChanges = function () {
     if (!this.doc) return;
     var current = this.ytext.toString();
-    var value = this.textarea.value;
+    var value = this.editor.getValue();
     if (current === value) return;
     var d = diffStrings(current, value);
     var ytext = this.ytext;
@@ -669,10 +995,8 @@
   // Submitting it again would duplicate it, so the field is locked with a
   // banner until the page is reloaded (which also shows the new comment).
   Session.prototype.posted = function (name) {
-    var ta = this.textarea;
     this.stop('posted');
-    ta.disabled = true;
-    ta.classList.add('realtime-editor-posted');
+    this.editor.disable();
     var banner = el('div', 'realtime-editor-banner');
     banner.setAttribute('role', 'alert');
     banner.appendChild(el('strong', null, t.posted_by.replace('%{name}', name)));
@@ -684,7 +1008,7 @@
       window.location.reload();
     });
     banner.appendChild(reload);
-    ta.insertAdjacentElement('beforebegin', banner);
+    this.editor.root().insertAdjacentElement('beforebegin', banner);
   };
 
   // Lets this form save on top of a version another collaborator produced:
@@ -790,20 +1114,15 @@
     clearTimeout(this.caretTimer);
     if (this.inflight) this.inflight.abort();
     if (reason !== 'forbidden') { this.flush(); this.leave(); }
-    this.textarea.removeEventListener('input', this.onInput);
-    this.textarea.removeEventListener('change', this.onInput);
-    this.textarea.removeEventListener('keyup', this.onSelect);
-    this.textarea.removeEventListener('mouseup', this.onSelect);
-    this.textarea.removeEventListener('focus', this.onSelect);
-    this.textarea.removeEventListener('blur', this.onBlur);
-    document.removeEventListener('selectionchange', this.onSelect);
-    if (this.overlay) this.overlay.destroy();
+    this.editor.destroy();
     document.removeEventListener('visibilitychange', this.onVisibility);
     window.removeEventListener('pagehide', this.onPageHide);
     var form = formOf(this.textarea);
     if (form) form.removeEventListener('submit', this.onSubmit);
     if (this.bar.parentNode) this.bar.parentNode.removeChild(this.bar);
     if (this.marker && this.marker.parentNode) this.marker.parentNode.removeChild(this.marker);
+    if (this.undoManager) this.undoManager.destroy();
+    this.undoManager = null;
     if (this.doc) this.doc.destroy();
     this.doc = null;
   };
@@ -1196,12 +1515,18 @@
   var formSessions = new Map();
   var HIDDEN_GRACE_MS = 3000;
 
-  function track(registry, elements, describeFn, Ctor) {
+  function track(registry, elements, describeFn, Ctor, rootOf) {
     var now = Date.now();
     for (var i = 0; i < elements.length; i++) {
       var node = elements[i];
-      var visible = isVisible(node);
+      var visible = isVisible(rootOf ? rootOf(node) : node);
       var session = registry.get(node);
+      // The Monaco plugin may take over the textarea after we bound to it.
+      if (session && session.editorKind && session.editorKind !== editorKindOf(node)) {
+        session.stop();
+        registry.delete(node);
+        session = null;
+      }
       if (visible && !session && !node.disabled) {
         var info = describeFn(node);
         if (info) registry.set(node, new Ctor(node, info));
@@ -1223,7 +1548,7 @@
   }
 
   function scan() {
-    track(sessions, document.querySelectorAll('textarea.wiki-edit'), describe, Session);
+    track(sessions, document.querySelectorAll('textarea.wiki-edit'), describe, Session, editorRootOf);
     track(formSessions, document.querySelectorAll('form#issue-form'), describeForm, FieldsSession);
   }
 
@@ -1232,7 +1557,9 @@
     setInterval(scan, 700);
     new MutationObserver(scan).observe(document.body, { childList: true, subtree: true });
     document.addEventListener('focusin', function (e) {
-      if (e.target && e.target.matches && e.target.matches('textarea.wiki-edit')) scan();
+      var target = e.target;
+      if (!target || !target.matches) return;
+      if (target.matches('textarea.wiki-edit') || target.closest('.monaco-editor-wrapper')) scan();
     });
   }
 
