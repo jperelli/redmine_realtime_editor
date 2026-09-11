@@ -346,26 +346,6 @@
 
   var monacoStyleSeq = 0;
 
-  // Undo/redo handlers per Monaco editor instance. Monaco's own undo stack
-  // stores text offsets, which remote edits invalidate, so while a session is
-  // bound the shortcuts go to the session's Y.UndoManager instead.
-  var monacoUndoHooks = new WeakMap();
-
-  function bindMonacoUndoKeys(editor) {
-    if (monacoUndoHooks.has(editor)) return;
-    monacoUndoHooks.set(editor, null);
-    var monaco = window.monaco;
-    var run = function (action) {
-      return function () {
-        var hooks = monacoUndoHooks.get(editor);
-        if (hooks) hooks[action](); else editor.trigger('keyboard', action, null);
-      };
-    };
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyZ, run('undo'));
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyZ, run('redo'));
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyY, run('redo'));
-  }
-
   function MonacoEditor(textarea, editor, carets) {
     this.kind = 'monaco';
     this.textarea = textarea;
@@ -373,7 +353,7 @@
     this.monaco = window.monaco;
     this.applying = false;
     this.disposables = [];
-    bindMonacoUndoKeys(editor);
+    this.undoModel = null;
     // Yjs indexes count \n line breaks, like the textarea.
     editor.getModel().setEOL(this.monaco.editor.EndOfLineSequence.LF);
     if (carets) {
@@ -446,8 +426,15 @@
     this.editor.revealPositionInCenterIfOutsideViewport(pos);
   };
 
+  // Monaco's own undo stack stores text offsets, which remote edits (applied
+  // with applyEdits) invalidate. Every undo path — keybinding, context menu,
+  // command palette, editor.trigger — ends in model.undo()/redo(), so those
+  // are overridden on the bound model to drive the session's Y.UndoManager.
   MonacoEditor.prototype.bindUndo = function (hooks) {
-    monacoUndoHooks.set(this.editor, hooks);
+    var model = this.editor.getModel();
+    this.undoModel = model;
+    model.undo = function () { hooks.undo(); };
+    model.redo = function () { hooks.redo(); };
   };
 
   MonacoEditor.prototype.selection = function () {
@@ -520,7 +507,11 @@
   MonacoEditor.prototype.destroy = function () {
     for (var i = 0; i < this.disposables.length; i++) this.disposables[i].dispose();
     this.disposables = [];
-    if (monacoUndoHooks.get(this.editor)) monacoUndoHooks.set(this.editor, null);
+    if (this.undoModel) {
+      delete this.undoModel.undo;
+      delete this.undoModel.redo;
+      this.undoModel = null;
+    }
     if (this.decorations) this.decorations.clear();
     if (this.style && this.style.parentNode) this.style.parentNode.removeChild(this.style);
   };

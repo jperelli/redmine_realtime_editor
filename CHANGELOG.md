@@ -4,7 +4,7 @@
 
 ### Features
 
-- Support for the [Monaco Editor plugin](https://github.com/ochipin/redmine_monaco_editor): when it replaces a textarea the session binds to the Monaco model (local edits, remote edits applied as model edits, remote carets and selections as decorations, read-only lock after a shared comment is posted). Users on Monaco and on the plain textarea co-edit the same text. Undo/redo in Monaco (Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y) go through a Yjs `UndoManager`, so they only revert the user's own edits and never the other users' text.
+- Support for the [Monaco Editor plugin](https://github.com/ochipin/redmine_monaco_editor): when it replaces a textarea the session binds to the Monaco model (local edits, remote edits applied as model edits, remote carets and selections as decorations, read-only lock after a shared comment is posted). Users on Monaco and on the plain textarea co-edit the same text. Undo/redo in Monaco (shortcuts, command palette, API) go through a Yjs `UndoManager`, so they only revert the user's own edits and never the other users' text.
 
 ## v0.1.0 - 2026-09-09
 
