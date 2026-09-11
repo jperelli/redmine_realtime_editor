@@ -81,6 +81,24 @@
     return out;
   }
 
+  // Index just after the last change of a delta, in the resulting text.
+  function deltaEnd(delta) {
+    var pos = 0;
+    var end = 0;
+    for (var i = 0; i < delta.length; i++) {
+      var op = delta[i];
+      if (op.retain != null) {
+        pos += op.retain;
+      } else if (op.insert != null) {
+        pos += op.insert.length;
+        end = pos;
+      } else if (op.delete != null) {
+        end = pos;
+      }
+    }
+    return end;
+  }
+
   function csrfToken() {
     var meta = document.querySelector('meta[name="csrf-token"]');
     return meta ? meta.content : '';
@@ -328,6 +346,26 @@
 
   var monacoStyleSeq = 0;
 
+  // Undo/redo handlers per Monaco editor instance. Monaco's own undo stack
+  // stores text offsets, which remote edits invalidate, so while a session is
+  // bound the shortcuts go to the session's Y.UndoManager instead.
+  var monacoUndoHooks = new WeakMap();
+
+  function bindMonacoUndoKeys(editor) {
+    if (monacoUndoHooks.has(editor)) return;
+    monacoUndoHooks.set(editor, null);
+    var monaco = window.monaco;
+    var run = function (action) {
+      return function () {
+        var hooks = monacoUndoHooks.get(editor);
+        if (hooks) hooks[action](); else editor.trigger('keyboard', action, null);
+      };
+    };
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyZ, run('undo'));
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyZ, run('redo'));
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyY, run('redo'));
+  }
+
   function MonacoEditor(textarea, editor, carets) {
     this.kind = 'monaco';
     this.textarea = textarea;
@@ -335,6 +373,7 @@
     this.monaco = window.monaco;
     this.applying = false;
     this.disposables = [];
+    bindMonacoUndoKeys(editor);
     // Yjs indexes count \n line breaks, like the textarea.
     editor.getModel().setEOL(this.monaco.editor.EndOfLineSequence.LF);
     if (carets) {
@@ -375,7 +414,7 @@
   };
 
   // Replays a Y.Text delta as model edits so Monaco keeps its own state
-  // (undo stack, folding, decorations) instead of a full setValue.
+  // (folding, decorations, view) instead of a full setValue.
   MonacoEditor.prototype.applyDelta = function (delta) {
     var editor = this.editor;
     var sel = editor.getSelection();
@@ -399,6 +438,16 @@
       var h = model.getPositionAt(transformIndex(delta, head));
       editor.setSelection(new this.monaco.Selection(a.lineNumber, a.column, h.lineNumber, h.column));
     }
+  };
+
+  MonacoEditor.prototype.setCaret = function (index) {
+    var pos = this.editor.getModel().getPositionAt(index);
+    this.editor.setPosition(pos);
+    this.editor.revealPositionInCenterIfOutsideViewport(pos);
+  };
+
+  MonacoEditor.prototype.bindUndo = function (hooks) {
+    monacoUndoHooks.set(this.editor, hooks);
   };
 
   MonacoEditor.prototype.selection = function () {
@@ -471,6 +520,7 @@
   MonacoEditor.prototype.destroy = function () {
     for (var i = 0; i < this.disposables.length; i++) this.disposables[i].dispose();
     this.disposables = [];
+    if (monacoUndoHooks.get(this.editor)) monacoUndoHooks.set(this.editor, null);
     if (this.decorations) this.decorations.clear();
     if (this.style && this.style.parentNode) this.style.parentNode.removeChild(this.style);
   };
@@ -572,6 +622,7 @@
     this.stopped = false;
     this.doc = null;
     this.ytext = null;
+    this.undoManager = null;
 
     this.editor = makeEditor(textarea, !this.presenceOnly);
     this.editorKind = this.editor.kind;
@@ -662,13 +713,15 @@
     this.savedText = savedText == null ? '' : savedText.replace(/\r\n?/g, '\n');
     this.doc = new Y.Doc();
     this.ytext = this.doc.getText('text');
+    this.undoManager = this.editor.bindUndo ? this.buildUndoManager() : null;
 
     this.doc.on('update', function (update, origin) {
-      if (origin === 'local') self.pending.push(update);
+      if (self.isLocalOrigin(origin)) self.pending.push(update);
     });
     this.ytext.observe(function (event, txn) {
       if (txn.origin === 'local') return;
       self.applyRemoteDelta(event.delta);
+      if (self.undoManager && txn.origin === self.undoManager) self.editor.setCaret(deltaEnd(event.delta));
     });
 
     this.applyRemoteUpdates(updates);
@@ -693,6 +746,23 @@
       this.editor.setValue(draft);
       if (draft !== this.savedText) this.showNotice(t.draft_loaded);
     }
+    if (this.undoManager) this.undoManager.clear();
+  };
+
+  // Undo/redo of our own edits only, as CRDT operations: a peer's edits are
+  // never reverted and stay where they are, whatever the editor's own stack
+  // would have done with its stale offsets.
+  Session.prototype.buildUndoManager = function () {
+    var manager = new Y.UndoManager(this.ytext, { trackedOrigins: new Set(['local']), captureTimeout: 500 });
+    this.editor.bindUndo({
+      undo: function () { manager.undo(); },
+      redo: function () { manager.redo(); }
+    });
+    return manager;
+  };
+
+  Session.prototype.isLocalOrigin = function (origin) {
+    return origin === 'local' || (this.undoManager !== null && origin === this.undoManager);
   };
 
   Session.prototype.applyRemoteUpdates = function (updates) {
@@ -1060,6 +1130,8 @@
     if (form) form.removeEventListener('submit', this.onSubmit);
     if (this.bar.parentNode) this.bar.parentNode.removeChild(this.bar);
     if (this.marker && this.marker.parentNode) this.marker.parentNode.removeChild(this.marker);
+    if (this.undoManager) this.undoManager.destroy();
+    this.undoManager = null;
     if (this.doc) this.doc.destroy();
     this.doc = null;
   };

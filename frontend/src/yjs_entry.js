@@ -5,6 +5,9 @@ export {
   applyUpdate,
   encodeStateAsUpdate,
   mergeUpdates,
+  // Collaborative undo for editors whose own undo stack cannot follow remote
+  // edits (Monaco): only local changes are undone, never the other users'.
+  UndoManager,
   // Remote carets travel as relative positions: they stay attached to the
   // right character while the text changes around them.
   createRelativePositionFromTypeIndex,
