@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- Monaco Editor fullscreen mode no longer ends the collaborative session: the fullscreen wrapper is `position: fixed`, which the visibility check (based on `offsetParent`) mistook for a hidden editor, so after three seconds in fullscreen the session was dropped, edits made in fullscreen (typing, table builder updates) stayed local and were discarded when the session reconnected on exit.
+
 ## v0.2.0 - 2026-09-11
 
 ### Features

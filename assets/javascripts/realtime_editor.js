@@ -104,8 +104,10 @@
     return meta ? meta.content : '';
   }
 
+  // Not offsetParent: it is null for position: fixed elements too, which is
+  // what the Monaco plugin's fullscreen mode makes of its editor wrapper.
   function isVisible(el) {
-    return document.body.contains(el) && el.offsetParent !== null;
+    return document.body.contains(el) && el.getClientRects().length > 0;
   }
 
   function el(tag, className, text) {
